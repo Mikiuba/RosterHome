@@ -1,0 +1,9 @@
+{
+  "name":"RosterHome",
+  "short_name":"RosterHome",
+  "start_url":"./index.html",
+  "display":"standalone",
+  "background_color":"#0b1020",
+  "theme_color":"#0b1020",
+  "description":"Calendario conjunto para tripulaciones: roster, sueño protegido, recovery y tiempo en pareja."
+}

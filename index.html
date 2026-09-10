@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1020" />
+  <title>RosterHome</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><div class="logo">✈️</div><div><h1>RosterHome</h1><div class="subtitle">Rosters, sueño y tiempo juntos</div></div></div>
+    <div class="privacy">🔒 Datos solo en este dispositivo</div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-view="calendarView">Calendario</button>
+    <button class="tab" data-view="importView">Importar roster</button>
+    <button class="tab" data-view="rulesView">Reglas</button>
+    <button class="tab" data-view="summaryView">Resumen</button>
+  </nav>
+
+  <section id="calendarView" class="view active">
+    <div class="card">
+      <div class="calendar-head">
+        <button class="btn ghost" id="prevMonth">←</button>
+        <div class="month-title" id="monthTitle"></div>
+        <button class="btn ghost" id="nextMonth">→</button>
+      </div>
+      <div class="legend">
+        <span><i class="dot p1"></i><span id="legendP1">Persona 1</span></span>
+        <span><i class="dot p2"></i><span id="legendP2">Persona 2</span></span>
+        <span><i class="dot sleep"></i>Sueño protegido</span>
+        <span><i class="dot rec"></i>Recovery</span>
+        <span><i class="dot couple"></i>Ventana juntos</span>
+      </div>
+      <div class="calendar" id="calendar"></div>
+    </div>
+  </section>
+
+  <section id="importView" class="view">
+    <div class="grid two">
+      <div class="card person" data-person-card="0">
+        <h2>👨‍✈️ Perfil 1</h2>
+        <div class="fieldrow"><div><label>Nombre</label><input id="name0" value="Miguel"></div><div><label>Color lógico</label><input value="Azul" disabled></div></div>
+        <label>Roster CrewLink / NetLine (.pdf o .txt)</label>
+        <div class="drop"><strong>Selecciona el roster</strong><span class="muted">La app intenta leer C/I, vuelos, C/O, DT, EARLY/LATE/NIGHT y OFF.</span><br><br><input type="file" id="file0" accept=".pdf,.txt,text/plain,application/pdf"></div>
+        <div id="status0" class="status"></div>
+        <div class="actions"><button class="btn danger" data-clear="0">Borrar roster</button></div>
+      </div>
+
+      <div class="card person p2" data-person-card="1">
+        <h2>👩‍✈️ Perfil 2</h2>
+        <div class="fieldrow"><div><label>Nombre</label><input id="name1" value="Nicole"></div><div><label>Color lógico</label><input value="Violeta" disabled></div></div>
+        <label>Roster CrewLink / NetLine (.pdf o .txt)</label>
+        <div class="drop"><strong>Selecciona el roster</strong><span class="muted">Puede ser de otra compañía si mantiene un formato CrewLink parecido.</span><br><br><input type="file" id="file1" accept=".pdf,.txt,text/plain,application/pdf"></div>
+        <div id="status1" class="status"></div>
+        <div class="actions"><button class="btn danger" data-clear="1">Borrar roster</button></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h3>Fallback: pegar texto del roster</h3>
+      <div class="fieldrow"><div><label>Perfil</label><select id="pastePerson"><option value="0">Perfil 1</option><option value="1">Perfil 2</option></select></div><div></div></div>
+      <textarea id="pasteText" placeholder="Pega aquí texto extraído de CrewLink si algún PDF concreto no se lee bien…"></textarea>
+      <div class="actions"><button class="btn primary" id="importText">Importar texto</button></div>
+    </div>
+  </section>
+
+  <section id="rulesView" class="view">
+    <div class="card">
+      <h2>⚙️ Reglas de casa</h2>
+      <div class="notice">El roster se interpreta como UTC por defecto. El calendario de convivencia se calcula en vuestra zona horaria de casa.</div>
+      <div class="rulegrid">
+        <div><label>Zona horaria de casa</label><input id="homeTz" value="Europe/Athens"></div>
+        <div><label>Horas mínimas de sueño</label><input id="sleepHours" type="number" min="6" max="12" step="0.25" value="8"></div>
+        <div><label>Quiet hours antes de dormir (min)</label><input id="quietLead" type="number" min="0" max="120" value="30"></div>
+        <div><label>Trayecto casa → report (min)</label><input id="commuteOut" type="number" min="0" max="180" value="0"></div>
+        <div><label>Trayecto C/O → casa (min)</label><input id="commuteHome" type="number" min="0" max="180" value="0"></div>
+        <div><label>Duty largo desde (h)</label><input id="longDuty" type="number" min="8" max="16" step="0.5" value="10"></div>
+        <div><label>Duty muy largo desde (h)</label><input id="veryLongDuty" type="number" min="9" max="18" step="0.5" value="12"></div>
+        <div><label>Recovery parcial (h)</label><input id="partialRecovery" type="number" min="2" max="24" value="6"></div>
+        <div><label>Recovery completo (h)</label><input id="fullRecovery" type="number" min="4" max="36" value="12"></div>
+        <div><label>Comida preferida</label><input id="lunchTime" type="time" value="14:00"></div>
+        <div><label>Cena preferida</label><input id="dinnerTime" type="time" value="20:30"></div>
+        <div><label>Margen comida/cena (min)</label><input id="mealFlex" type="number" min="0" max="180" value="60"></div>
+      </div>
+      <div class="actions"><button class="btn primary" id="saveRules">Guardar reglas</button><button class="btn" id="exportIcs">Exportar calendario HOME (.ics)</button></div>
+    </div>
+  </section>
+
+  <section id="summaryView" class="view">
+    <div class="stats" id="stats"></div>
+    <div class="grid two" style="margin-top:16px">
+      <div class="card"><h3>❤️ Mejores ventanas juntos</h3><div id="bestWindows" class="summary-list"></div></div>
+      <div class="card"><h3>⚠️ Días que requieren coordinación</h3><div id="coordination" class="summary-list"></div></div>
+    </div>
+  </section>
+
+  <div class="footer">MVP local · RosterHome v0.1 · No sustituye límites FTL ni decisiones de fatiga operacional.</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="roster-parser.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
