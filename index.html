@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b1020" />
   <title>RosterHome</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=0.2.1c" />
+  <link rel="stylesheet" href="styles.css?v=0.2.1d" />
 </head>
 <body>
 <div class="app">
@@ -111,6 +111,7 @@
         <label>Roster CrewLink / NetLine (.pdf o .txt)</label>
         <div class="drop"><strong>Selecciona el roster</strong><span class="muted">La app intenta leer C/I, vuelos, C/O, DT, EARLY/LATE/NIGHT y OFF.</span><br><br><input type="file" id="file0" accept=".pdf,.txt,text/plain,application/pdf"></div>
         <div id="status0" class="status"></div>
+        <div id="audit0" class="import-audit"></div>
         <div class="actions"><button class="btn danger" data-clear="0">Borrar roster</button></div>
       </div>
 
@@ -120,8 +121,15 @@
         <label>Roster CrewLink / NetLine (.pdf o .txt)</label>
         <div class="drop"><strong>Selecciona el roster</strong><span class="muted">Puede ser de otra compañía si mantiene un formato CrewLink parecido.</span><br><br><input type="file" id="file1" accept=".pdf,.txt,text/plain,application/pdf"></div>
         <div id="status1" class="status"></div>
+        <div id="audit1" class="import-audit"></div>
         <div class="actions"><button class="btn danger" data-clear="1">Borrar roster</button></div>
       </div>
+    </div>
+
+    <div class="card import-safety" style="margin-top:16px">
+      <h3>🧪 Control de coherencia del importador</h3>
+      <p class="muted">Antes de guardar un roster, RosterHome comprueba fechas, C/I–C/O, DT, solapamientos y continuidad entre duties. En los C/I sin fecha que imprime CrewLink al continuar una secuencia, usa el BRK del duty anterior para reconstruir el día correcto.</p>
+      <div class="notice"><b>Importante:</b> esto valida que el PDF se haya leído de forma coherente; todavía no es una comprobación FTL de legalidad o descanso mínimo.</div>
     </div>
 
     <div class="card" style="margin-top:16px">
@@ -223,7 +231,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="roster-parser.js?v=0.2.1c"></script>
-<script src="app.js?v=0.2.1c"></script>
+<script src="roster-parser.js?v=0.2.1d"></script>
+<script src="app.js?v=0.2.1d"></script>
 </body>
 </html>

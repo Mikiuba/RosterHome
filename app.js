@@ -17,7 +17,7 @@ const DEFAULT_STATE = {
 let state = loadState();
 let renderedEvents = new Map();
 let eventCounter = 0;
-const STATE_SCHEMA_VERSION = 3;
+const STATE_SCHEMA_VERSION = 4;
 
 function dutyIdentity(d){
   if(!d) return '';
@@ -529,10 +529,13 @@ async function extractPdfText(file){
   const data=new Uint8Array(await file.arrayBuffer()); const pdf=await pdfjsLib.getDocument({data}).promise; let out='';
   for(let p=1;p<=pdf.numPages;p++){
     const page=await pdf.getPage(p); const viewport=page.getViewport({scale:1}); const tc=await page.getTextContent();
-    const items=tc.items.filter(i=>i.str&&i.str.trim()).map(i=>{ const t=pdfjsLib.Util.transform(viewport.transform,i.transform); return {str:i.str.trim(),x:t[4],y:t[5]}; });
-    const mid=viewport.width*0.52;
+    const items=tc.items.filter(i=>i.str&&i.str.trim()).map(i=>{ const t=pdfjsLib.Util.transform(viewport.transform,i.transform); const width=Number(i.width||0); return {str:i.str.trim(),x:t[4],cx:t[4]+width/2,y:t[5]}; });
+    // CrewLink landscape pages contain two independent duty columns. Split exactly at
+    // the page centre and assign by text-centre so date labels near the gutter do not
+    // get detached from their C/I/C/O row.
+    const mid=viewport.width*0.5;
     const build=(xs)=>{ const rows=[]; xs.sort((a,b)=>a.y-b.y||a.x-b.x); for(const it of xs){ let row=rows.find(r=>Math.abs(r.y-it.y)<2.4); if(!row){row={y:it.y,items:[]};rows.push(row);} row.items.push(it); } rows.sort((a,b)=>a.y-b.y); return rows.map(r=>r.items.sort((a,b)=>a.x-b.x).map(x=>x.str).join(' ')).join('\n'); };
-    out+='\n'+build(items.filter(i=>i.x<mid))+'\n'+build(items.filter(i=>i.x>=mid));
+    out+=`\n[[PAGE ${p} LEFT]]\n`+build(items.filter(i=>i.cx<mid))+`\n[[PAGE ${p} RIGHT]]\n`+build(items.filter(i=>i.cx>=mid));
   }
   return out;
 }
@@ -563,13 +566,46 @@ function mergeParsed(personIndex, parsed, source){
 }
 
 
+function gapLabel(minutes){
+  if(minutes==null || !Number.isFinite(minutes)) return '—';
+  const m=Math.max(0,Math.round(minutes)); return `${Math.floor(m/60)} h ${String(m%60).padStart(2,'0')} min`;
+}
+function renderImportAudit(personIndex, parsed){
+  const el=$(`audit${personIndex}`); if(!el) return;
+  const v=parsed?.validation; if(!v){el.innerHTML='';return;}
+  const s=v.stats||{};
+  const chips=[
+    `${s.duties||0} duties detectados`,
+    `${s.overlaps||0} solapamientos`,
+    `${s.brkMatches||0} continuidades BRK verificadas`,
+    `${s.inferredDates||0} fechas reconstruidas`,
+    `intervalo mínimo ${gapLabel(s.minGapMinutes)}`
+  ];
+  let html=`<div class="audit-title">${v.ok?'✓ Importación coherente':'⚠️ Importación detenida'}</div><div class="audit-chips">${chips.map(x=>`<span>${esc(x)}</span>`).join('')}</div>`;
+  if(v.errors?.length) html+=`<div class="audit-errors"><b>Errores:</b><ul>${v.errors.slice(0,4).map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`;
+  if(v.warnings?.length) html+=`<details class="audit-warnings"><summary>${v.warnings.length} aviso${v.warnings.length===1?'':'s'} de coherencia</summary><ul>${v.warnings.slice(0,6).map(x=>`<li>${esc(x)}</li>`).join('')}</ul></details>`;
+  el.className='import-audit '+(v.ok?'ok':'bad'); el.innerHTML=html;
+}
+function validateBeforeMerge(parsed){
+  const n=(parsed?.duties||[]).filter(x=>x.kind==='duty').length;
+  if(!n) throw new Error('No he encontrado ningún C/I/C/O reconocible. Prueba el fallback de texto o pásame este formato para añadirlo.');
+  if(parsed.validation && !parsed.validation.ok){
+    const first=parsed.validation.errors?.[0]||'La secuencia temporal no es coherente.';
+    throw new Error(`No he guardado este roster porque el importador detectó una incoherencia: ${first}`);
+  }
+  return n;
+}
+
 async function handleFile(personIndex,file){
-  const box=$(`status${personIndex}`); box.className='status'; box.textContent='Leyendo roster…';
+  const box=$(`status${personIndex}`); box.className='status'; box.textContent='Leyendo y validando roster…';
+  const audit=$(`audit${personIndex}`); if(audit){audit.className='import-audit';audit.innerHTML='';}
   try{
     const text=file.name.toLowerCase().endsWith('.pdf')?await extractPdfText(file):await file.text();
-    const parsed=RosterParser.parseCrewLinkText(text); const count=mergeParsed(personIndex,parsed,file.name);
-    if(!count) throw new Error('No he encontrado ningún C/I/C/O reconocible. Prueba el fallback de texto o pásame este formato para añadirlo.');
-    box.className='status ok'; box.textContent=`✓ ${count} duties importados · periodo reemplazado sin duplicados · ${parsed.period?parsed.period.start.toISOString().slice(0,7):'periodo detectado'} · ${file.name}`;
+    const parsed=RosterParser.parseCrewLinkText(text);
+    renderImportAudit(personIndex,parsed);
+    const detected=validateBeforeMerge(parsed);
+    const count=mergeParsed(personIndex,parsed,file.name);
+    box.className='status ok'; box.textContent=`✓ ${count} duties importados y validados · periodo reemplazado · ${parsed.period?parsed.period.start.toISOString().slice(0,7):'periodo detectado'} · ${file.name}`;
   }catch(e){box.className='status err';box.textContent='⚠️ '+e.message;}
 }
 
@@ -617,8 +653,8 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{doc
 document.querySelectorAll('[data-calendar-mode]').forEach(b=>b.addEventListener('click',()=>setCalendarMode(b.dataset.calendarMode)));
 document.querySelectorAll('[data-calendar-density]').forEach(b=>b.addEventListener('click',()=>{ state.calendarDensity=b.dataset.calendarDensity; saveState(); renderCalendar(); }));
 [0,1].forEach(i=>{$(`file${i}`).addEventListener('change',e=>e.target.files[0]&&handleFile(i,e.target.files[0]));$(`name${i}`).addEventListener('change',e=>{state.people[i].name=e.target.value.trim()||`Perfil ${i+1}`;saveState();renderCalendar();});});
-document.querySelectorAll('[data-clear]').forEach(b=>b.addEventListener('click',()=>{const i=Number(b.dataset.clear);state.people[i].duties=[];state.people[i].source=null;saveState();$(`status${i}`).textContent='Roster borrado.';renderCalendar();}));
-$('importText').addEventListener('click',()=>{try{const i=Number($('pastePerson').value),parsed=RosterParser.parseCrewLinkText($('pasteText').value);const n=mergeParsed(i,parsed,'texto pegado');if(!n)throw new Error('No se han detectado duties.');$('pasteText').value='';alert(`${n} duties importados.`);}catch(e){alert(e.message);}});
+document.querySelectorAll('[data-clear]').forEach(b=>b.addEventListener('click',()=>{const i=Number(b.dataset.clear);state.people[i].duties=[];state.people[i].source=null;saveState();$(`status${i}`).textContent='Roster borrado.';if($(`audit${i}`))$(`audit${i}`).innerHTML='';renderCalendar();}));
+$('importText').addEventListener('click',()=>{try{const i=Number($('pastePerson').value),parsed=RosterParser.parseCrewLinkText($('pasteText').value);renderImportAudit(i,parsed);validateBeforeMerge(parsed);const n=mergeParsed(i,parsed,'texto pegado');$('pasteText').value='';alert(`${n} duties importados y validados.`);}catch(e){alert(e.message);}});
 $('saveRules').addEventListener('click',()=>{try{new Intl.DateTimeFormat('es',{timeZone:$('homeTz').value}).format();readRules();alert('Reglas guardadas.');}catch(e){alert('Zona horaria no válida. Usa, por ejemplo, Europe/Athens o Europe/Madrid.');}});
 $('prevMonth').addEventListener('click',()=>shiftPeriod(-1)); $('nextMonth').addEventListener('click',()=>shiftPeriod(1)); $('todayBtn').addEventListener('click',goToday); $('exportIcs').addEventListener('click',exportIcs);
 $('calendar').addEventListener('click',e=>{const eventBtn=e.target.closest('[data-event-id]');if(eventBtn){openEventDetails(eventBtn.dataset.eventId);return;}const dayBtn=e.target.closest('[data-open-day]');if(dayBtn)openDay(dayBtn.dataset.openDay);});

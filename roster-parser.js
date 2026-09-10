@@ -20,9 +20,11 @@
     const sm = MONTHS[m[2][0].toUpperCase()+m[2].slice(1,3).toLowerCase()];
     const em = MONTHS[m[5][0].toUpperCase()+m[5].slice(1,3).toLowerCase()];
     if (sm == null || em == null) return null;
+    let sy=2000+Number(m[3]), ey=2000+Number(m[6]);
+    if (ey < sy) ey = sy;
     return {
-      start: new Date(Date.UTC(2000 + Number(m[3]), sm, Number(m[1]))),
-      end: new Date(Date.UTC(2000 + Number(m[6]), em, Number(m[4])))
+      start: new Date(Date.UTC(sy, sm, Number(m[1]))),
+      end: new Date(Date.UTC(ey, em, Number(m[4])))
     };
   }
 
@@ -32,15 +34,14 @@
     return { crewCode: m[1].trim(), name: m[2].replace(/\s{2,}/g, ' ').trim() };
   }
 
-  function dateFromDay(period, day, monthHint) {
+  function dateFromDay(period, day) {
     const base = period ? period.start : new Date();
-    let y = base.getUTCFullYear();
-    let m = monthHint == null ? base.getUTCMonth() : monthHint;
-    // If period crosses a month and the day number wrapped, infer the end month.
-    if (period && period.end.getUTCMonth() !== period.start.getUTCMonth()) {
-      if (day < period.start.getUTCDate()) m = period.end.getUTCMonth();
+    let y = base.getUTCFullYear(), mon = base.getUTCMonth();
+    if (period && (period.end.getUTCFullYear() !== y || period.end.getUTCMonth() !== mon)) {
+      const startDay = period.start.getUTCDate();
+      if (day < startDay) { y = period.end.getUTCFullYear(); mon = period.end.getUTCMonth(); }
     }
-    return new Date(Date.UTC(y, m, day));
+    return new Date(Date.UTC(y, mon, day));
   }
 
   function setTime(date, hhmm) {
@@ -49,15 +50,16 @@
     d.setUTCHours(Number(s.slice(0,2)), Number(s.slice(2,4)), 0, 0);
     return d;
   }
-
   function plusDay(d, n=1) { const x = new Date(d); x.setUTCDate(x.getUTCDate()+n); return x; }
-  function durationHours(a,b) { return (b-a)/3600000; }
-
   function parseDuration(s) {
     const m = String(s||'').match(/(\d{1,3}):(\d{2})/);
     if (!m) return null;
     return Number(m[1]) + Number(m[2])/60;
   }
+  function minutesBetween(a,b){ return Math.round((new Date(b)-new Date(a))/60000); }
+  function minutesFromHours(h){ return Math.round(Number(h||0)*60); }
+  function isoDay(d){ return new Date(d).toISOString().slice(0,10); }
+  function hhmmUTC(d){ const x=new Date(d); return String(x.getUTCHours()).padStart(2,'0')+String(x.getUTCMinutes()).padStart(2,'0'); }
 
   function routeFromFlights(flights) {
     if (!flights.length) return '';
@@ -67,7 +69,6 @@
   }
 
   function parseFlights(block) {
-    // Generic CrewLink flight row: carrier number DEP HHMM HHMM ARR aircraft
     const re = /\b([A-Z0-9]{2,3})\s+(\d{1,4}[A-Z]?)\s+([A-Z]{3})\s+(\d{4})\s+(\d{4})\s+([A-Z]{3})\s+([A-Z0-9]{3,5})\b/g;
     const out = [];
     let m;
@@ -79,117 +80,205 @@
     return out.map(({_key,...x}) => x);
   }
 
-  function lastRegexMatch(text, re) {
-    let m, last = null;
-    while ((m = re.exec(text))) last = m;
-    return last;
+  function getField(block, name) {
+    const m = block.match(new RegExp('\\['+name+'\\s+([^\\]]+)\\]','i'));
+    return m ? m[1].replace(/\s+/g,' ').trim() : null;
   }
 
-  function findDateTokenBefore(text, pos, period) {
-    // Keep the generic fallback intentionally local. CrewLink repeats a full month
-    // header on every page, so a long look-behind can accidentally pick a date from
-    // that header instead of the duty immediately preceding an undated C/I row.
-    const prefix = text.slice(Math.max(0,pos-700), pos);
-    const re = new RegExp(DAY_RE+'(\\d{2})', 'g');
-    const last = lastRegexMatch(prefix, re);
-    if (!last) return null;
-    return dateFromDay(period, Number(last[2]));
+  function operationalDateBefore(text, pos, period) {
+    // Only inspect actual detail rows. Never use the repeated monthly CRM header as a date anchor.
+    const prefix = text.slice(Math.max(0,pos-1800), pos);
+    const re = new RegExp('(?:^|\\n)\\s*'+DAY_RE+'(\\d{2})\\s+(?=(?:C\\/I|C\\/O|[A-Z0-9]{2,3}\\s+\\d{1,4}))','gmi');
+    let m, last=null;
+    while ((m=re.exec(prefix))) last=m;
+    return last ? dateFromDay(period, Number(last[2])) : null;
   }
 
-  function inferLooseCheckInDate(text, pos, period) {
-    // CrewLink often omits the date before a second C/I on the same operational day.
-    // The previous duty metadata normally contains [RT DD/HHMM], which is a much
-    // stronger anchor than the repeated calendar header. Prefer it first.
-    const prefix = text.slice(Math.max(0,pos-1100), pos);
-    const rt = lastRegexMatch(prefix, /\[RT\s+(\d{1,2})\/\d{4}\]/gi);
-    if (rt) return dateFromDay(period, Number(rt[1]));
+  function collectBlocks(text) {
+    const ci = /\bC\/I\b\s+([A-Z]{3})\s+(\d{4})/g;
+    const starts=[]; let m;
+    while ((m=ci.exec(text))) {
+      const lineStart=text.lastIndexOf('\n',m.index)+1;
+      const before=text.slice(lineStart,m.index);
+      const dm=before.match(new RegExp('^\\s*'+DAY_RE+'(\\d{2})\\b','i'));
+      starts.push({index:m.index, lineStart, base:m[1], time:m[2], explicitDay:dm?Number(dm[2]):null});
+    }
+    return starts;
+  }
 
-    // Next best anchor: an explicitly dated C/O line immediately before this C/I.
-    const co = lastRegexMatch(prefix, new RegExp(DAY_RE+'(\\d{2})[^\n]{0,100}?\\bC\\/O\\b', 'gi'));
-    if (co) return dateFromDay(period, Number(co[2]));
+  function parseStructuralBlock(text, start, end) {
+    const block=text.slice(start.lineStart, end);
+    const coRe=new RegExp('(?:^|\\n)\\s*(?:'+DAY_RE+'(\\d{2})\\s+)?C\\/O\\s+(\\d{4})\\s+([A-Z]{3})','im');
+    const co=coRe.exec(block);
+    const flightBlock=co ? block.slice(0,co.index) : block;
+    const flights=parseFlights(flightBlock);
+    return {
+      ...start,
+      block,
+      coDay:co&&co[2]?Number(co[2]):null,
+      coTime:co?co[3]:null,
+      coBase:co?co[4]:start.base,
+      flights,
+      route:routeFromFlights(flights),
+      type:getField(block,'TYPE') || 'N/A',
+      ft:getField(block,'FT'),
+      dt:getField(block,'DT'),
+      fdt:getField(block,'FDT'),
+      max:getField(block,'max'),
+      sdt:getField(block,'SDT'),
+      dp:getField(block,'DP'),
+      fdp:getField(block,'FDP'),
+      rt:getField(block,'RT'),
+      brk:getField(block,'BRK'),
+      xfdp:getField(block,'xFDP'),
+      acc:getField(block,'ACC'),
+      ln:getField(block,'LN')
+    };
+  }
 
-    return findDateTokenBefore(text, pos, period);
+  function chooseCheckInDate(text, s, period, previous) {
+    let candidate=s.explicitDay ? dateFromDay(period,s.explicitDay) : null;
+    let source=s.explicitDay ? 'explicit' : null;
+
+    // BRK in CrewLink is an excellent continuity check for this layout: the following C/I
+    // should occur exactly BRK after the previous C/O. Use it to date undated C/I rows.
+    if (previous && previous.checkout && previous.brk) {
+      const brkH=parseDuration(previous.brk);
+      if (brkH != null) {
+        const expected=new Date(new Date(previous.checkout).getTime()+brkH*3600000);
+        const sameClock=hhmmUTC(expected)===s.time;
+        if (!candidate && sameClock) { candidate=new Date(Date.UTC(expected.getUTCFullYear(),expected.getUTCMonth(),expected.getUTCDate())); source='previous-brk'; }
+        // If an extraction artifact attached the wrong day to this C/I, trust BRK only when
+        // the clock time matches exactly and the candidate is off by whole days.
+        if (candidate && sameClock) {
+          const cand=setTime(candidate,s.time);
+          const diff=Math.abs(cand-expected);
+          if (diff>=20*3600000 && Math.abs(diff/86400000-Math.round(diff/86400000))<0.03) {
+            candidate=new Date(Date.UTC(expected.getUTCFullYear(),expected.getUTCMonth(),expected.getUTCDate()));
+            source='previous-brk-reconciled';
+          }
+        }
+      }
+    }
+
+    if (!candidate) {
+      const nearby=operationalDateBefore(text,s.index,period);
+      if (nearby) { candidate=nearby; source='nearby-row'; }
+    }
+
+    if (!candidate && previous) {
+      let d=new Date(Date.UTC(new Date(previous.checkIn).getUTCFullYear(),new Date(previous.checkIn).getUTCMonth(),new Date(previous.checkIn).getUTCDate()));
+      let x=setTime(d,s.time);
+      // A later report on the same UTC day may be valid. If it would precede the previous C/O,
+      // roll forward until the sequence is chronological.
+      while (previous.checkout && x < new Date(previous.checkout)) { d=plusDay(d,1); x=setTime(d,s.time); }
+      candidate=d; source='chronological';
+    }
+
+    if (!candidate) { candidate=period ? new Date(period.start) : new Date(); source='fallback'; }
+    return {date:candidate, source};
+  }
+
+  function buildDuties(text, period, structures) {
+    const duties=[]; let previous=null;
+    for (const s of structures) {
+      const chosen=chooseCheckInDate(text,s,period,previous);
+      const baseDate=chosen.date;
+      const checkIn=setTime(baseDate,s.time);
+      let checkout=null;
+      if (s.coTime) {
+        const outDate=s.coDay ? dateFromDay(period,s.coDay) : new Date(baseDate);
+        checkout=setTime(outDate,s.coTime);
+        while (checkout<=checkIn) checkout=plusDay(checkout,1);
+      } else if (s.dt) {
+        const h=parseDuration(s.dt);
+        if (h!=null) checkout=new Date(checkIn.getTime()+h*3600000);
+      }
+      const duty={
+        kind:'duty', date:isoDay(checkIn), base:s.base, checkIn:checkIn.toISOString(),
+        checkout:checkout?checkout.toISOString():null, checkoutBase:s.coBase||s.base,
+        type:s.type, ft:s.ft, dt:s.dt, fdt:s.fdt, max:s.max, sdt:s.sdt, dp:s.dp,
+        fdp:s.fdp, rt:s.rt, brk:s.brk, xfdp:s.xfdp, acc:s.acc, ln:s.ln,
+        flights:s.flights, route:s.route,
+        dutyHours:s.dt ? parseDuration(s.dt) : (checkout ? (checkout-checkIn)/3600000 : null),
+        parserDateSource:chosen.source
+      };
+      duties.push(duty); previous=duty;
+    }
+    return duties;
+  }
+
+  function dedupe(list) {
+    const map=new Map();
+    for (const d of list) {
+      const k=d.kind==='status' ? `s|${d.date}|${d.status}` : `d|${d.checkIn}|${d.route||d.base||''}`;
+      const richness=(d.checkout?3:0)+(d.route?2:0)+(d.dt?1:0)+(d.flights?.length||0);
+      const old=map.get(k);
+      if (!old || richness>=old.richness) map.set(k,{d,richness});
+    }
+    return [...map.values()].map(x=>x.d);
+  }
+
+  function validateDuties(duties) {
+    const flying=duties.filter(d=>d.kind==='duty').sort((a,b)=>a.checkIn.localeCompare(b.checkIn));
+    const errors=[], warnings=[];
+    let minGapMinutes=null, overlaps=0, inferredDates=0, brkMatches=0;
+    for (let i=0;i<flying.length;i++) {
+      const d=flying[i];
+      if (d.parserDateSource!=='explicit') inferredDates++;
+      if (!d.checkout) errors.push(`Duty ${d.date} ${d.route||d.base||''}: no se pudo determinar C/O.`);
+      if (d.checkout && d.dt) {
+        const actual=minutesBetween(d.checkIn,d.checkout), stated=minutesFromHours(parseDuration(d.dt));
+        if (Math.abs(actual-stated)>10) errors.push(`Duty ${d.date} ${d.route||d.base||''}: DT ${d.dt} no coincide con C/I–C/O (${actual} min).`);
+      }
+      if (i>0) {
+        const prev=flying[i-1];
+        if (prev.checkout) {
+          const gap=minutesBetween(prev.checkout,d.checkIn);
+          minGapMinutes=minGapMinutes==null?gap:Math.min(minGapMinutes,gap);
+          if (gap<0) { overlaps++; errors.push(`Solapamiento: ${prev.date} ${prev.route||prev.base||''} termina después de que empiece ${d.date} ${d.route||d.base||''}.`); }
+          else if (gap<120) warnings.push(`Intervalo muy corto (${gap} min) entre ${prev.date} y ${d.date}; conviene revisar el PDF.`);
+          if (prev.brk) {
+            const expected=minutesFromHours(parseDuration(prev.brk));
+            if (expected!=null) {
+              if (Math.abs(gap-expected)<=10) brkMatches++;
+              else if (gap>=0 && Math.abs(gap-expected)>30) warnings.push(`BRK ${prev.brk} no coincide con el intervalo calculado (${Math.floor(gap/60)}:${String(gap%60).padStart(2,'0')}) tras ${prev.date}.`);
+            }
+          }
+        }
+      }
+    }
+    // Contradictory duties at the exact same report time are never silently accepted.
+    const at=new Map();
+    for(const d of flying){
+      const k=d.checkIn; const old=at.get(k);
+      if(old && (old.route||'')!==(d.route||'')) errors.push(`Dos duties distintos tienen el mismo C/I: ${d.checkIn.slice(0,16)} (${old.route||'?'} / ${d.route||'?'}).`);
+      else at.set(k,d);
+    }
+    return {ok:errors.length===0, errors, warnings, stats:{duties:flying.length, overlaps, inferredDates, brkMatches, minGapMinutes}};
   }
 
   function parseCrewLinkText(input) {
-    const text = cleanText(input);
-    const period = parsePeriod(text);
-    const crew = parseCrewName(text);
-    const duties = [];
-    const seen = new Set();
+    const text=cleanText(input);
+    const period=parsePeriod(text);
+    const crew=parseCrewName(text);
+    const starts=collectBlocks(text);
+    const structures=starts.map((s,i)=>parseStructuralBlock(text,s,i+1<starts.length?starts[i+1].lineStart:Math.min(text.length,s.index+5000)));
+    let duties=buildDuties(text,period,structures);
 
-    // Locate check-ins. The date normally sits on the same line; fallback looks immediately before it.
-    const ciRe = new RegExp('(?:^|\\n)\\s*'+DAY_RE+'(\\d{2})[^\\n]{0,90}?\\bC\\/I\\b\\s+([A-Z]{3})\\s+(\\d{4})', 'gmi');
-    const starts = [];
+    const seenStatus=new Set();
+    const dayLineRe=new RegExp('(?:^|\\n)\\s*'+DAY_RE+'(\\d{2})\\s+(ROFF|OFF|RES|SBY|STBY|VAC|ABS|SIM|TRG)\\b(?:\\s+([A-Z]{3}))?','gmi');
     let m;
-    while ((m = ciRe.exec(text))) {
-      starts.push({ index:m.index, day:Number(m[2]), base:m[3], time:m[4], matchEnd:ciRe.lastIndex });
+    while((m=dayLineRe.exec(text))){
+      const date=dateFromDay(period,Number(m[2])).toISOString().slice(0,10), status=m[3].toUpperCase();
+      const k=date+'|'+status; if(seenStatus.has(k)) continue; seenStatus.add(k);
+      duties.push({kind:'status',date,status,base:m[4]||null});
     }
 
-    // Supplement strict matches with C/I rows whose date was printed earlier in the same CrewLink column
-    // (common on an overnight sequence after a C/O line).
-    const loose = /\bC\/I\b\s+([A-Z]{3})\s+(\d{4})/g;
-    while ((m = loose.exec(text))) {
-      if (starts.some(s => Math.abs(s.index - m.index) < 120)) continue;
-      const d = inferLooseCheckInDate(text, m.index, period);
-      if (d) starts.push({ index:m.index, day:d.getUTCDate(), base:m[1], time:m[2], matchEnd:loose.lastIndex });
-    }
-    starts.sort((a,b)=>a.index-b.index);
-
-    for (let i=0;i<starts.length;i++) {
-      const s = starts[i];
-      const end = i+1 < starts.length ? starts[i+1].index : Math.min(text.length, s.index + 2200);
-      const block = text.slice(s.index, end);
-      const baseDate = dateFromDay(period, s.day);
-      const checkIn = setTime(baseDate, s.time);
-
-      const co = block.match(/(?:\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(\d{2})\b[^\n]{0,70})?\bC\/O\b\s+(\d{4})\s+([A-Z]{3})/i)
-              || block.match(/\bC\/O\b[^\n]{0,60}?(\d{4})\s+([A-Z]{3})/i);
-      let checkout = null, checkoutBase = s.base;
-      if (co) {
-        let dayOverride = null, hhmm, b;
-        if (co.length >= 4 && co[3]) { dayOverride = co[1] ? Number(co[1]) : null; hhmm = co[2]; b = co[3]; }
-        else { hhmm = co[1]; b = co[2]; }
-        checkoutBase = b || s.base;
-        const outDate = dayOverride ? dateFromDay(period, dayOverride) : baseDate;
-        checkout = setTime(outDate, hhmm);
-        if (checkout <= checkIn) checkout = plusDay(checkout, 1);
-      }
-
-      const type = (block.match(/\[TYPE\s+([^\]]+)\]/i)||[])[1]?.trim() || 'N/A';
-      const dt = (block.match(/\[DT\s+(\d{1,3}:\d{2})\]/i)||[])[1] || null;
-      const fdp = (block.match(/\[FDP\s+(\d{1,3}:\d{2})\]/i)||[])[1] || null;
-      const ft = (block.match(/\[FT\s+(\d{1,3}:\d{2})\]/i)||[])[1] || null;
-      // Only flight rows before the first C/O belong to this duty. Anything after C/O can be
-      // metadata or the crew-information section, which repeats flights and would contaminate routes.
-      const flightBlock = co && Number.isInteger(co.index) ? block.slice(0, co.index) : block;
-      const flights = parseFlights(flightBlock);
-      const route = routeFromFlights(flights);
-      const key = [baseDate.toISOString().slice(0,10),s.time,checkout?.toISOString()||'',route].join('|');
-      if (seen.has(key)) continue;
-      seen.add(key);
-
-      duties.push({
-        kind:'duty', date:baseDate.toISOString().slice(0,10), base:s.base, checkIn:checkIn.toISOString(),
-        checkout:checkout?.toISOString() || null, checkoutBase, type, dt, fdp, ft, flights, route,
-        dutyHours: dt ? parseDuration(dt) : (checkout ? durationHours(checkIn,checkout) : null)
-      });
-    }
-
-    // Parse simple non-flying day entries (OFF/ROFF/RES/etc.). These are useful when PDFs have no C/I duties.
-    const dayLineRe = new RegExp('(?:^|\\n)\\s*'+DAY_RE+'(\\d{2})\\s+(ROFF|OFF|RES|SBY|STBY|VAC|ABS|SIM|TRG)\\b(?:\\s+([A-Z]{3}))?', 'gmi');
-    while ((m = dayLineRe.exec(text))) {
-      const date = dateFromDay(period, Number(m[2])).toISOString().slice(0,10);
-      const code = m[3].toUpperCase();
-      const key = date+'|'+code;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      duties.push({kind:'status', date, status:code, base:m[4]||null});
-    }
-
-    duties.sort((a,b)=> (a.checkIn||a.date).localeCompare(b.checkIn||b.date));
-    return { period, crew, duties, rawLength:text.length };
+    duties=dedupe(duties).sort((a,b)=>(a.checkIn||a.date).localeCompare(b.checkIn||b.date));
+    const validation=validateDuties(duties);
+    return {period,crew,duties,validation,rawLength:text.length};
   }
 
-  return { parseCrewLinkText, parsePeriod, parseCrewName, parseDuration };
+  return {parseCrewLinkText,parsePeriod,parseCrewName,parseDuration,validateDuties};
 });

@@ -80,3 +80,12 @@ La vista de calendario dispone ahora de dos niveles de detalle:
 - **Completo**: muestra también Quiet hours y las ventanas juntos como eventos del calendario.
 
 Al abrir un duty, primero aparece un resumen en lenguaje simple. Los campos técnicos de CrewLink quedan dentro de **Datos CrewLink / técnicos** para consultarlos solo cuando hagan falta.
+
+
+## Importador reforzado (build d, sigue siendo v0.2.1)
+- Lectura CrewLink de dos columnas separando exactamente por el centro de la página.
+- Los C/I sin fecha se reconstruyen usando continuidad temporal y el campo BRK del duty anterior cuando coincide.
+- Validación previa a guardar: C/I/C/O, DT frente a duración real, solapamientos y continuidad BRK.
+- Si el parser produce una secuencia imposible, el roster NO se guarda.
+- La pestaña Importar muestra un resumen de coherencia para poder auditar qué ha entendido la app.
+- Estas comprobaciones son de integridad del importador, no de legalidad FTL.

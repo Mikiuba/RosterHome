@@ -193,3 +193,7 @@ button.event.calendar-block:hover,button.event.calendar-block:focus-visible{filt
   .month-view .insight-pill{font-size:7px;padding:1px 3px}
   .day-opportunity{padding:9px 11px}
 }
+
+/* Import integrity — build d */
+.import-audit{margin-top:10px}.import-audit:empty{display:none}.import-audit{padding:11px 12px;border:1px solid var(--line);border-radius:12px;background:#0f1728;font-size:11px;line-height:1.4}.import-audit.ok{border-color:rgba(123,224,179,.28);background:rgba(123,224,179,.045)}.import-audit.bad{border-color:rgba(255,139,158,.32);background:rgba(255,139,158,.05)}.audit-title{font-weight:800;font-size:12px;margin-bottom:8px}.import-audit.ok .audit-title{color:var(--good)}.import-audit.bad .audit-title{color:var(--bad)}.audit-chips{display:flex;flex-wrap:wrap;gap:6px}.audit-chips span{padding:5px 7px;border:1px solid var(--line);border-radius:999px;color:#cbd5eb;background:rgba(255,255,255,.025)}.audit-errors,.audit-warnings{margin-top:9px;color:#d9e1f4}.audit-errors ul,.audit-warnings ul{margin:6px 0 0;padding-left:18px}.audit-errors{color:#ffd0d7}.audit-warnings summary{cursor:pointer;color:#ffe2a1}.import-safety p{line-height:1.5;margin:4px 0 12px}
+@media(max-width:700px){.audit-chips{display:grid;grid-template-columns:1fr 1fr}.audit-chips span{border-radius:9px}.import-audit{font-size:10.5px}}
