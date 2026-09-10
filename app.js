@@ -17,7 +17,7 @@ const DEFAULT_STATE = {
 let state = loadState();
 let renderedEvents = new Map();
 let eventCounter = 0;
-const STATE_SCHEMA_VERSION = 4;
+const STATE_SCHEMA_VERSION = 5;
 
 function dutyIdentity(d){
   if(!d) return '';
@@ -85,6 +85,17 @@ function timeLocal(date){ return fmt(date,{hour:'2-digit',minute:'2-digit',hour1
 function monthLabel(ym){ const [y,m]=ym.split('-').map(Number); return new Intl.DateTimeFormat('es-ES',{month:'long',year:'numeric'}).format(new Date(y,m-1,1)); }
 function localDateTime(date){ return fmt(date,{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hour12:false}); }
 function utcDateTime(date){ return new Intl.DateTimeFormat('es-ES',{timeZone:'UTC',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(date))+' UTC'; }
+function hhmmDisplay(v){ const s=String(v||'').replace(/\D/g,'').slice(0,4).padStart(4,'0'); return `${s.slice(0,2)}:${s.slice(2,4)}`; }
+function sourceDateDisplay(key){ if(!key)return '—'; const [y,m,d]=String(key).split('-'); return `${d}/${m}/${y}`; }
+function sourceRosterTime(d,which){
+  const isIn=which==='in';
+  const date=isIn?d.sourceCheckInDate:d.sourceCheckOutDate;
+  const time=isIn?d.sourceCheckInTime:d.sourceCheckOutTime;
+  const airport=isIn?d.sourceCheckInAirport:d.sourceCheckOutAirport;
+  if(!time){ const instant=isIn?d.checkIn:d.checkout; return instant?utcDateTime(instant):'—'; }
+  if(d.timeBasis==='local_event') return `${sourceDateDisplay(date)} ${hhmmDisplay(time)} ${airport||''} · hora local del aeropuerto`;
+  return `${sourceDateDisplay(date)} ${hhmmDisplay(time)} UTC`;
+}
 
 function tzOffsetMillis(date, timeZone){
   const parts = new Intl.DateTimeFormat('en-US',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(date);
@@ -496,14 +507,19 @@ function eventDetailHtml(e){
     html+='</div>';
     if(d.flights?.length){
       html+='<div class="detail-section"><h3>Sectores</h3><div class="sector-list">';
-      d.flights.forEach(f=>{html+=`<div class="sector"><b>${esc(`${f.dep} → ${f.arr}`)}</b><span>${esc(`${f.carrier} ${f.number} · ${f.depTime.slice(0,2)}:${f.depTime.slice(2)}–${f.arrTime.slice(0,2)}:${f.arrTime.slice(2)} UTC`)}</span><small>${esc(f.aircraft||'')}</small></div>`;});
+      d.flights.forEach(f=>{
+        const depOff=f.depDayOffset?`+${f.depDayOffset}`:''; const arrOff=f.arrDayOffset?`+${f.arrDayOffset}`:'';
+        const basis=d.timeBasis==='local_event'?'hora local de cada aeropuerto':'UTC';
+        html+=`<div class="sector"><b>${esc(`${f.dep} → ${f.arr}`)}</b><span>${esc(`${f.carrier} ${f.number} · ${hhmmDisplay(f.depTime)}${depOff}–${hhmmDisplay(f.arrTime)}${arrOff} · ${basis}`)}</span><small>${esc(f.aircraft||'')}</small></div>`;
+      });
       html+='</div></div>';
     }
     html+='<details class="technical-details"><summary>Datos CrewLink / técnicos</summary><div class="technical-details-body">';
     html+=detailRow('C/I · hora de casa',localDateTime(e.start));
     html+=detailRow('C/O · hora de casa',d.checkout?localDateTime(e.end):'Sin C/O detectado');
-    html+=detailRow('C/I · roster',utcDateTime(e.start));
-    html+=detailRow('C/O · roster',d.checkout?utcDateTime(e.end):'Sin C/O detectado');
+    html+=detailRow('Base horaria del roster',d.timeBasis==='local_event'?'Horas locales en cada aeropuerto':'UTC');
+    html+=detailRow('C/I · roster',sourceRosterTime(d,'in'));
+    html+=detailRow('C/O · roster',d.checkout?sourceRosterTime(d,'out'):'Sin C/O detectado');
     if(d.dt) html+=detailRow('DT',d.dt);
     if(d.fdt) html+=detailRow('FDT',d.fdt);
     if(d.fdp) html+=detailRow('FDP',d.fdp);
@@ -618,6 +634,7 @@ function renderImportAudit(personIndex, parsed){
   const s=v.stats||{};
   const chips=[
     `${s.duties||0} duties detectados`,
+    parsed.timeBasis==='local_event'?'horario CrewLink: local por aeropuerto':'horario CrewLink: UTC',
     `${s.overlaps||0} solapamientos`,
     `${s.brkMatches||0} continuidades BRK verificadas`,
     `${s.inferredDates||0} fechas reconstruidas`,

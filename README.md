@@ -89,3 +89,19 @@ Al abrir un duty, primero aparece un resumen en lenguaje simple. Los campos téc
 - Si el parser produce una secuencia imposible, el roster NO se guarda.
 - La pestaña Importar muestra un resumen de coherencia para poder auditar qué ha entendido la app.
 - Estas comprobaciones son de integridad del importador, no de legalidad FTL.
+
+
+## v0.2.1 — timeline placement fix
+- Fixed day-view clipping for events crossing local midnight.
+- Day blocks now show the visible portion (e.g. `00:00–07:25 · desde ayer` or `23:40–24:00 · sigue mañana`).
+- Added a safety invariant: a sleep window that truly overlaps a duty is flagged explicitly instead of rendered as normal sleep.
+
+
+## v0.2.1 — compatibilidad de formatos CrewLink (build f)
+- El importador ya distingue automáticamente entre rosters CrewLink en UTC y rosters con `Local times at event airport`.
+- Los horarios locales se convierten a instantes UTC usando la zona horaria del aeropuerto base; si la zona es desconocida, la importación se detiene en lugar de asumir UTC.
+- Los sectores aceptan los marcadores `!` y `+1` de CrewLink, por lo que rutas como `HAJ–HER–HAJ` ya no se reducen a `HAJ`.
+- La auditoría de importación indica ahora si el PDF usa UTC o horas locales por aeropuerto.
+- El detalle de cada duty muestra las horas del roster en su base horaria real y no etiqueta como UTC un roster local.
+- Se reconoce `STAND-BY`/`STBY`/`SBY` como estado del roster.
+- Para aplicar la corrección a datos ya guardados, hay que reimportar una vez el roster afectado.

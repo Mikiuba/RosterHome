@@ -1,5 +1,5 @@
-const CACHE='rosterhome-v021-build-e';
-const LOCAL=['./','./index.html','./styles.css?v=0.2.1e','./app.js?v=0.2.1e','./roster-parser.js?v=0.2.1e','./manifest.webmanifest'];
+const CACHE='rosterhome-v021-build-f';
+const LOCAL=['./','./index.html','./styles.css?v=0.2.1f','./app.js?v=0.2.1f','./roster-parser.js?v=0.2.1f','./manifest.webmanifest'];
 self.addEventListener('install',e=>{self.skipWaiting();e.waitUntil(caches.open(CACHE).then(c=>c.addAll(LOCAL)));});
 self.addEventListener('activate',e=>e.waitUntil(Promise.all([
   caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))),

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b1020" />
   <title>RosterHome</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=0.2.1e" />
+  <link rel="stylesheet" href="styles.css?v=0.2.1f" />
 </head>
 <body>
 <div class="app">
@@ -68,6 +68,7 @@
               <div><b>OFF</b><span>Día libre indicado por el roster.</span></div>
               <div><b>ROFF</b><span>Requested Off Day: día libre solicitado.</span></div>
               <div><b>RES</b><span>Reserved for Duty: reservado para servicio.</span></div>
+              <div><b>STBY</b><span>Stand-by: periodo de disponibilidad indicado por CrewLink.</span></div>
               <div><b>ABS</b><span>Ausencia/actividad no voladora indicada por CrewLink.</span></div>
               <div><b>EARLY</b><span>Duty clasificado por CrewLink como temprano.</span></div>
               <div><b>LATE</b><span>Duty clasificado por CrewLink como tardío.</span></div>
@@ -109,7 +110,7 @@
         <h2>👨‍✈️ Perfil 1</h2>
         <div class="fieldrow"><div><label>Nombre</label><input id="name0" value="Miguel"></div><div><label>Color lógico</label><input value="Azul" disabled></div></div>
         <label>Roster CrewLink / NetLine (.pdf o .txt)</label>
-        <div class="drop"><strong>Selecciona el roster</strong><span class="muted">La app intenta leer C/I, vuelos, C/O, DT, EARLY/LATE/NIGHT y OFF.</span><br><br><input type="file" id="file0" accept=".pdf,.txt,text/plain,application/pdf"></div>
+        <div class="drop"><strong>Selecciona el roster</strong><span class="muted">La app detecta automáticamente si CrewLink usa UTC u horas locales y lee C/I, sectores, C/O, DT, EARLY/LATE/NIGHT, OFF y STBY.</span><br><br><input type="file" id="file0" accept=".pdf,.txt,text/plain,application/pdf"></div>
         <div id="status0" class="status"></div>
         <div id="audit0" class="import-audit"></div>
         <div class="actions"><button class="btn danger" data-clear="0">Borrar roster</button></div>
@@ -119,7 +120,7 @@
         <h2>👩‍✈️ Perfil 2</h2>
         <div class="fieldrow"><div><label>Nombre</label><input id="name1" value="Nicole"></div><div><label>Color lógico</label><input value="Violeta" disabled></div></div>
         <label>Roster CrewLink / NetLine (.pdf o .txt)</label>
-        <div class="drop"><strong>Selecciona el roster</strong><span class="muted">Puede ser de otra compañía si mantiene un formato CrewLink parecido.</span><br><br><input type="file" id="file1" accept=".pdf,.txt,text/plain,application/pdf"></div>
+        <div class="drop"><strong>Selecciona el roster</strong><span class="muted">Admite también el formato CrewLink con “Local times at event airport”, marcadores ! y cambios de día +1.</span><br><br><input type="file" id="file1" accept=".pdf,.txt,text/plain,application/pdf"></div>
         <div id="status1" class="status"></div>
         <div id="audit1" class="import-audit"></div>
         <div class="actions"><button class="btn danger" data-clear="1">Borrar roster</button></div>
@@ -128,7 +129,7 @@
 
     <div class="card import-safety" style="margin-top:16px">
       <h3>🧪 Control de coherencia del importador</h3>
-      <p class="muted">Antes de guardar un roster, RosterHome comprueba fechas, C/I–C/O, DT, solapamientos y continuidad entre duties. En los C/I sin fecha que imprime CrewLink al continuar una secuencia, usa el BRK del duty anterior para reconstruir el día correcto.</p>
+      <p class="muted">Antes de guardar un roster, RosterHome detecta la base horaria del PDF y comprueba fechas, C/I–C/O, DT, solapamientos y continuidad entre duties. En los C/I sin fecha que imprime CrewLink al continuar una secuencia, usa el BRK del duty anterior para reconstruir el día correcto.</p>
       <div class="notice"><b>Importante:</b> esto valida que el PDF se haya leído de forma coherente; todavía no es una comprobación FTL de legalidad o descanso mínimo.</div>
     </div>
 
@@ -186,7 +187,7 @@
   <section id="rulesView" class="view">
     <div class="card">
       <h2>⚙️ Reglas de casa</h2>
-      <div class="notice">El roster se interpreta como UTC por defecto. El calendario de convivencia se calcula en vuestra zona horaria de casa.</div>
+      <div class="notice">RosterHome detecta automáticamente si cada PDF CrewLink está en UTC o en horas locales por aeropuerto. El calendario de convivencia se muestra en vuestra zona horaria de casa.</div>
       <div class="rulegrid">
         <div><label>Zona horaria de casa</label><input id="homeTz" value="Europe/Athens"></div>
         <div><label>Horas mínimas de sueño</label><input id="sleepHours" type="number" min="6" max="12" step="0.25" value="8"></div>
@@ -231,7 +232,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="roster-parser.js?v=0.2.1e"></script>
-<script src="app.js?v=0.2.1e"></script>
+<script src="roster-parser.js?v=0.2.1f"></script>
+<script src="app.js?v=0.2.1f"></script>
 </body>
 </html>
