@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b1020" />
   <title>RosterHome</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=0.2.1b" />
+  <link rel="stylesheet" href="styles.css?v=0.2.1c" />
 </head>
 <body>
 <div class="app">
@@ -38,16 +38,16 @@
         <button class="view-mode" data-calendar-mode="week">Semana</button>
         <button class="view-mode" data-calendar-mode="day">Día</button>
       </div>
-      <div class="legend">
-        <span><i class="dot p1"></i><span id="legendP1">Persona 1</span></span>
-        <span><i class="dot p2"></i><span id="legendP2">Persona 2</span></span>
-        <span><i class="dot sleep"></i>Sueño protegido</span>
-        <span><i class="dot rec"></i>Recovery</span>
-        <span><i class="dot couple"></i>Ventana juntos</span>
+      <div class="calendar-clarity-row">
+        <div class="calendar-density-switch" role="group" aria-label="Nivel de detalle">
+          <button class="density-mode active" data-calendar-density="simple">Esencial</button>
+          <button class="density-mode" data-calendar-density="full">Completo</button>
+        </div>
+        <span class="clarity-hint" id="clarityHint">Solo lo importante para planificar el día</span>
       </div>
 
-      <details class="legend-guide">
-        <summary>📖 Leyenda y significado de los términos</summary>
+      <details class="legend-guide compact-guide">
+        <summary>ⓘ Leyenda y términos</summary>
         <div class="legend-guide-body">
           <div class="legend-section">
             <h3>Bloques del calendario</h3>
@@ -223,7 +223,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="roster-parser.js?v=0.2.1b"></script>
-<script src="app.js?v=0.2.1b"></script>
+<script src="roster-parser.js?v=0.2.1c"></script>
+<script src="app.js?v=0.2.1c"></script>
 </body>
 </html>

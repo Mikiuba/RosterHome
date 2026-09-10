@@ -79,13 +79,36 @@
     return out.map(({_key,...x}) => x);
   }
 
-  function findDateTokenBefore(text, pos, period) {
-    const prefix = text.slice(Math.max(0,pos-2600), pos);
-    const re = new RegExp(DAY_RE+'(\\d{2})', 'g');
+  function lastRegexMatch(text, re) {
     let m, last = null;
-    while ((m = re.exec(prefix))) last = m;
+    while ((m = re.exec(text))) last = m;
+    return last;
+  }
+
+  function findDateTokenBefore(text, pos, period) {
+    // Keep the generic fallback intentionally local. CrewLink repeats a full month
+    // header on every page, so a long look-behind can accidentally pick a date from
+    // that header instead of the duty immediately preceding an undated C/I row.
+    const prefix = text.slice(Math.max(0,pos-700), pos);
+    const re = new RegExp(DAY_RE+'(\\d{2})', 'g');
+    const last = lastRegexMatch(prefix, re);
     if (!last) return null;
     return dateFromDay(period, Number(last[2]));
+  }
+
+  function inferLooseCheckInDate(text, pos, period) {
+    // CrewLink often omits the date before a second C/I on the same operational day.
+    // The previous duty metadata normally contains [RT DD/HHMM], which is a much
+    // stronger anchor than the repeated calendar header. Prefer it first.
+    const prefix = text.slice(Math.max(0,pos-1100), pos);
+    const rt = lastRegexMatch(prefix, /\[RT\s+(\d{1,2})\/\d{4}\]/gi);
+    if (rt) return dateFromDay(period, Number(rt[1]));
+
+    // Next best anchor: an explicitly dated C/O line immediately before this C/I.
+    const co = lastRegexMatch(prefix, new RegExp(DAY_RE+'(\\d{2})[^\n]{0,100}?\\bC\\/O\\b', 'gi'));
+    if (co) return dateFromDay(period, Number(co[2]));
+
+    return findDateTokenBefore(text, pos, period);
   }
 
   function parseCrewLinkText(input) {
@@ -108,7 +131,7 @@
     const loose = /\bC\/I\b\s+([A-Z]{3})\s+(\d{4})/g;
     while ((m = loose.exec(text))) {
       if (starts.some(s => Math.abs(s.index - m.index) < 120)) continue;
-      const d = findDateTokenBefore(text, m.index, period);
+      const d = inferLooseCheckInDate(text, m.index, period);
       if (d) starts.push({ index:m.index, day:d.getUTCDate(), base:m[1], time:m[2], matchEnd:loose.lastIndex });
     }
     starts.sort((a,b)=>a.index-b.index);

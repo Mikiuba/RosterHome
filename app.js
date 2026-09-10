@@ -10,6 +10,7 @@ const DEFAULT_STATE = {
   },
   month:new Date().toISOString().slice(0,7),
   calendarMode:'month',
+  calendarDensity:'simple',
   focusDate:new Date().toISOString().slice(0,10)
 };
 
@@ -59,6 +60,7 @@ function loadState(){
       rules,
       month,
       calendarMode:['month','week','day'].includes(saved.calendarMode)?saved.calendarMode:'month',
+      calendarDensity:['simple','full'].includes(saved.calendarDensity)?saved.calendarDensity:'simple',
       focusDate:saved.focusDate || `${month}-01`
     };
   }catch(e){ return clone(DEFAULT_STATE); }
@@ -242,7 +244,7 @@ function eventBlockMeta(e){
   if(e.kind==='duty'){
     const raw=e.raw||{}; const bits=[when];
     if(raw.type&&raw.type!=='N/A') bits.push(raw.type);
-    if(raw.dt) bits.push(`DT ${raw.dt}`);
+    if(state.calendarDensity==='full' && raw.dt) bits.push(`DT ${raw.dt}`);
     return bits.filter(Boolean).join(' · ');
   }
   if(e.kind==='recovery') return `${when}${e.level==='full'?' · completo':' · parcial'}`;
@@ -261,12 +263,32 @@ function renderEventButton(e,extraClass='',context='month'){
 function syncCalendarModeButtons(){
   document.querySelectorAll('[data-calendar-mode]').forEach(b=>b.classList.toggle('active',b.dataset.calendarMode===state.calendarMode));
 }
+function syncCalendarDensityButtons(){
+  document.querySelectorAll('[data-calendar-density]').forEach(b=>b.classList.toggle('active',b.dataset.calendarDensity===state.calendarDensity));
+  const hint=$('clarityHint');
+  if(hint) hint.textContent=state.calendarDensity==='simple'?'Solo lo importante para planificar el día':'Muestra también Quiet hours y ventanas juntos';
+}
+function calendarVisibleEvents(events, mode){
+  if(state.calendarDensity==='full') return events;
+  const allowed=mode==='month' ? new Set(['status','duty','recovery']) : new Set(['status','duty','sleep','recovery']);
+  return events.filter(e=>allowed.has(e.kind));
+}
+function simpleDayInsight(key,derived){
+  if(state.calendarDensity!=='simple') return '';
+  const sleeps=derived.filter(e=>e.kind==='sleep'&&eventOverlapsDay(e,key));
+  const cw=coupleWindowForDay(key,derived);
+  const bits=[];
+  if(sleeps.length) bits.push(`<span class="insight-pill sleep-insight">🌙 ${sleeps.length>1?sleeps.length+' sueños':'sueño'}</span>`);
+  if(cw) bits.push(`<span class="insight-pill couple-insight">❤️ ${timeLocal(cw.start)}–${timeLocal(cw.end)}</span>`);
+  return bits.length?`<div class="simple-insights">${bits.join('')}</div>`:'';
+}
 function renderCalendar(){
   renderedEvents=new Map(); eventCounter=0;
-  $('legendP1').textContent=state.people[0].name||'Perfil 1'; $('legendP2').textContent=state.people[1].name||'Perfil 2';
+  if($('legendP1')) $('legendP1').textContent=state.people[0].name||'Perfil 1'; if($('legendP2')) $('legendP2').textContent=state.people[1].name||'Perfil 2';
   if($('legendGuideP1')) $('legendGuideP1').textContent=state.people[0].name||'Perfil 1';
   if($('legendGuideP2')) $('legendGuideP2').textContent=state.people[1].name||'Perfil 2';
   syncCalendarModeButtons();
+  syncCalendarDensityButtons();
   const derived=allDerived();
   if(state.calendarMode==='week') renderWeekCalendar(derived);
   else if(state.calendarMode==='day') renderDayCalendar(derived);
@@ -283,11 +305,12 @@ function renderMonthCalendar(derived){
   const todayKey=dayKey(new Date());
   for(let d=1;d<=days;d++){
     const key=`${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const ev=eventsForDay(key,derived,false);
+    const ev=calendarVisibleEvents(eventsForDay(key,derived,false),'month');
     html+=`<div class="day ${key===todayKey?'today':''}"><button type="button" class="daynum daynum-btn" data-open-day="${key}" aria-label="Abrir ${esc(localDayLabel(key))}">${d}</button>`;
     const max=6;
     ev.slice(0,max).forEach(e=>{ html+=renderEventButton(e); });
     if(ev.length>max) html+=`<button type="button" class="more-events" data-open-day="${key}">+${ev.length-max} más</button>`;
+    html+=simpleDayInsight(key,derived);
     html+='</div>';
   }
   $('calendar').innerHTML=html;
@@ -299,10 +322,11 @@ function renderWeekCalendar(derived){
   $('calendar').className='calendar week-view';
   let html='<div class="week-grid">';
   for(let i=0;i<7;i++){
-    const key=addDaysKey(start,i); const ev=eventsForDay(key,derived,true);
+    const key=addDaysKey(start,i); const ev=calendarVisibleEvents(eventsForDay(key,derived,true),'week');
     const weekday=localDayLabel(key,{weekday:'short'}); const date=localDayLabel(key,{day:'numeric',month:'short'});
     html+=`<section class="week-day ${key===todayKey?'today':''}"><button type="button" class="week-day-head" data-open-day="${key}"><span>${esc(weekday)}</span><b>${esc(date)}</b></button><div class="week-events">`;
     html+=ev.length?ev.map(e=>renderEventButton(e,'week-event','week')).join(''):'<div class="empty-day">Sin eventos</div>';
+    html+=simpleDayInsight(key,derived);
     html+='</div></section>';
   }
   html+='</div>';
@@ -338,13 +362,17 @@ function assignTimelineLanes(segments){
   return xs;
 }
 function renderDayCalendar(derived){
-  const key=state.focusDate; const ev=eventsForDay(key,derived,true); const todayKey=dayKey(new Date());
+  const key=state.focusDate; const ev=calendarVisibleEvents(eventsForDay(key,derived,true),'day'); const todayKey=dayKey(new Date());
   $('monthTitle').textContent=localDayLabel(key,{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   $('calendar').className='calendar day-view';
   const allDay=ev.filter(e=>e.kind==='status');
   const segments=assignTimelineLanes(ev.filter(e=>e.kind!=='status'&&e.start&&e.end).map(e=>timelineSegment(e,key)).filter(Boolean));
   const H=64, dayHeight=24*H;
   let html=`<div class="day-agenda ${key===todayKey?'today':''}"><div class="day-agenda-head"><span>${ev.length} ${ev.length===1?'evento':'eventos'}</span><b>${esc(state.rules.homeTz)}</b></div>`;
+  if(state.calendarDensity==='simple'){
+    const cw=coupleWindowForDay(key,derived);
+    if(cw) html+=`<div class="day-opportunity"><span>❤️ Mejor ventana juntos</span><b>${timeLocal(cw.start)}–${timeLocal(cw.end)}</b></div>`;
+  }
   if(allDay.length){
     html+='<div class="all-day-row"><span class="all-day-label">Todo el día</span><div class="all-day-events">';
     html+=allDay.map(e=>renderEventButton(e,'all-day-event','day')).join('');
@@ -389,7 +417,10 @@ function eventTitle(e){
 }
 function eventSubtitle(e){
   if(e.kind==='duty'){
-    const raw=e.raw||{}; const bits=[]; if(raw.type&&raw.type!=='N/A')bits.push(raw.type); if(raw.dt)bits.push(`DT ${raw.dt}`); if(raw.ft)bits.push(`FT ${raw.ft}`); return bits.join(' · ')||'Duty CrewLink';
+    const raw=e.raw||{}; const bits=[];
+    if(raw.type&&raw.type!=='N/A') bits.push(raw.type);
+    if(state.calendarDensity==='full'){ if(raw.dt)bits.push(`DT ${raw.dt}`); if(raw.ft)bits.push(`FT ${raw.ft}`); }
+    return bits.join(' · ');
   }
   if(e.kind==='status') return 'Estado del roster';
   if(e.kind==='sleep') return `${state.rules.sleepHours} h antes del report`;
@@ -413,24 +444,33 @@ function eventKicker(e){
 }
 function eventDetailHtml(e){
   if(e.kind==='duty'){
-    const d=e.raw||{}; const dur=d.dt || (e.end&&e.start?`${((e.end-e.start)/3600000).toFixed(1)} h`:'—');
-    let html='<div class="detail-section"><h3>Resumen</h3>';
+    const d=e.raw||{};
+    const localRange=`${timeLocal(e.start)}–${d.checkout?timeLocal(e.end):'?'}`;
+    let html='<div class="detail-section detail-summary"><h3>En pocas palabras</h3>';
     html+=detailRow('Persona',state.people[e.person].name);
     html+=detailRow('Ruta',d.route||d.base||'Duty');
-    html+=detailRow('Tipo',d.type||'N/A');
+    html+=detailRow('Horario en casa',localRange);
+    if(d.type&&d.type!=='N/A') html+=detailRow('Tipo',d.type);
+    if(d.ft) html+=detailRow('Tiempo de vuelo',d.ft);
+    html+='</div>';
+    if(d.flights?.length){
+      html+='<div class="detail-section"><h3>Sectores</h3><div class="sector-list">';
+      d.flights.forEach(f=>{html+=`<div class="sector"><b>${esc(`${f.dep} → ${f.arr}`)}</b><span>${esc(`${f.carrier} ${f.number} · ${f.depTime.slice(0,2)}:${f.depTime.slice(2)}–${f.arrTime.slice(0,2)}:${f.arrTime.slice(2)} UTC`)}</span><small>${esc(f.aircraft||'')}</small></div>`;});
+      html+='</div></div>';
+    }
+    html+='<details class="technical-details"><summary>Datos CrewLink / técnicos</summary><div class="technical-details-body">';
     html+=detailRow('C/I · hora de casa',localDateTime(e.start));
     html+=detailRow('C/O · hora de casa',d.checkout?localDateTime(e.end):'Sin C/O detectado');
     html+=detailRow('C/I · roster',utcDateTime(e.start));
     html+=detailRow('C/O · roster',d.checkout?utcDateTime(e.end):'Sin C/O detectado');
-    html+=detailRow('Duty time',dur);
-    if(d.fdp)html+=detailRow('FDP',d.fdp);
-    if(d.ft)html+=detailRow('Flight time',d.ft);
-    html+='</div>';
-    if(d.flights?.length){
-      html+='<div class="detail-section"><h3>Sectores</h3><div class="sector-list">';
-      d.flights.forEach(f=>{html+=`<div class="sector"><b>${esc(`${f.carrier} ${f.number}`)}</b><span>${esc(`${f.dep} ${f.depTime.slice(0,2)}:${f.depTime.slice(2)} → ${f.arr} ${f.arrTime.slice(0,2)}:${f.arrTime.slice(2)} UTC`)}</span><small>${esc(f.aircraft||'')}</small></div>`;});
-      html+='</div></div>';
-    }
+    if(d.dt) html+=detailRow('DT',d.dt);
+    if(d.fdt) html+=detailRow('FDT',d.fdt);
+    if(d.fdp) html+=detailRow('FDP',d.fdp);
+    if(d.sdt) html+=detailRow('SDT',d.sdt);
+    if(d.max) html+=detailRow('max',d.max);
+    if(d.rt) html+=detailRow('RT',d.rt);
+    if(d.brk) html+=detailRow('BRK',d.brk);
+    html+='</div></details>';
     return html;
   }
   if(e.kind==='status'){
@@ -575,6 +615,7 @@ function exportIcs(){
 // UI wiring
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$(b.dataset.view).classList.add('active'); if(b.dataset.view==='summaryView')renderSummary(); if(b.dataset.view==='ftlView')renderFtl();}));
 document.querySelectorAll('[data-calendar-mode]').forEach(b=>b.addEventListener('click',()=>setCalendarMode(b.dataset.calendarMode)));
+document.querySelectorAll('[data-calendar-density]').forEach(b=>b.addEventListener('click',()=>{ state.calendarDensity=b.dataset.calendarDensity; saveState(); renderCalendar(); }));
 [0,1].forEach(i=>{$(`file${i}`).addEventListener('change',e=>e.target.files[0]&&handleFile(i,e.target.files[0]));$(`name${i}`).addEventListener('change',e=>{state.people[i].name=e.target.value.trim()||`Perfil ${i+1}`;saveState();renderCalendar();});});
 document.querySelectorAll('[data-clear]').forEach(b=>b.addEventListener('click',()=>{const i=Number(b.dataset.clear);state.people[i].duties=[];state.people[i].source=null;saveState();$(`status${i}`).textContent='Roster borrado.';renderCalendar();}));
 $('importText').addEventListener('click',()=>{try{const i=Number($('pastePerson').value),parsed=RosterParser.parseCrewLinkText($('pasteText').value);const n=mergeParsed(i,parsed,'texto pegado');if(!n)throw new Error('No se han detectado duties.');$('pasteText').value='';alert(`${n} duties importados.`);}catch(e){alert(e.message);}});
