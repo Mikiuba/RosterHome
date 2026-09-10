@@ -200,3 +200,105 @@ button.event.calendar-block:hover,button.event.calendar-block:focus-visible{filt
 
 /* v0.2.1 timeline placement fix */
 .timeline-event.sleep.conflict{background:repeating-linear-gradient(135deg,#a33b46 0,#a33b46 10px,#7e2934 10px,#7e2934 20px);outline:2px solid #ff8d98;outline-offset:-2px}
+
+/* =========================================================
+   RosterHome v0.2.1 · fixed left/right person lanes
+   Perfil 1 (Miguel by default) = left · Perfil 2 (Nicole) = right
+   ========================================================= */
+.split-people .owner-p0{--owner-accent:var(--p1-solid)}
+.split-people .owner-p1{--owner-accent:var(--p2-solid)}
+
+/* Month: every day is physically split into two stable person lanes. */
+.month-person-lanes{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:3px;align-items:start;min-width:0}
+.month-person-lane{min-width:0;padding:1px 0}
+.month-person-lane.person-0{padding-right:2px;border-right:1px solid rgba(255,255,255,.07)}
+.month-person-lane.person-1{padding-left:1px}
+.month-view .month-person-event.calendar-block{width:100%;min-width:0;margin:2px 0;padding:3px 4px}
+.month-view .month-person-event .event-block-title{font-size:8.5px}
+.month-view .month-person-event .event-block-meta{display:none}
+.month-view .lane-more{display:block;width:100%;margin:1px 0;padding:1px 2px;text-align:center;border:0;background:transparent;color:#9da9c0;font-size:7px}
+.shared-events{grid-column:1/-1;margin-top:2px}
+
+/* Week: two explicit person columns inside each day. */
+.week-person-head{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--calendar-grid);background:#0d1320}
+.week-person-head span{padding:6px 8px;font-size:10px;font-weight:750;color:#aeb9cf;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.week-person-head span:first-child{border-right:1px solid var(--calendar-grid);color:#91b5ff}
+.week-person-head span:last-child{text-align:right;color:#c8aaff}
+.week-events.person-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0;padding:0}
+.week-person-lane{min-width:0;padding:6px}
+.week-person-lane.person-0{border-right:1px solid var(--calendar-grid)}
+.week-person-lane .week-event.calendar-block{margin:4px 0}
+.week-shared{padding:0 6px 6px}
+.empty-person-lane{display:block;padding:10px 6px;color:#59667d;text-align:center;font-size:10px}
+
+/* Day: fixed 50/50 lanes, regardless of overlap timing. */
+.day-person-head{display:grid;grid-template-columns:58px 1fr 1fr;background:#0d1320;border-bottom:1px solid var(--calendar-grid)}
+.day-person-head::before{content:""}
+.day-person-head span{padding:7px 9px;font-size:10px;font-weight:800;color:#91b5ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.day-person-head span:last-child{text-align:right;color:#c8aaff;border-left:1px solid var(--calendar-grid)}
+.timeline-person-divider{position:absolute;top:0;bottom:0;left:50%;width:1px;background:rgba(115,127,153,.38);z-index:1;pointer-events:none}
+.timeline-event.owner-p0{box-shadow:inset 3px 0 0 rgba(255,255,255,.13),0 1px 3px rgba(0,0,0,.22)}
+.timeline-event.owner-p1{box-shadow:inset -3px 0 0 rgba(255,255,255,.13),0 1px 3px rgba(0,0,0,.22)}
+.timeline-event.owner-shared{z-index:3}
+.split-all-day{grid-template-columns:58px minmax(0,1fr)}
+.all-day-people{display:grid;grid-template-columns:1fr 1fr;min-width:0}
+.all-day-person{min-width:0;padding:0 4px}
+.all-day-person.person-0{border-right:1px solid var(--calendar-grid)}
+.all-day-shared{padding:5px 8px 7px 66px;background:#0d1320;border-bottom:1px solid var(--calendar-grid)}
+
+@media(max-width:560px){
+  .month-person-lanes{gap:2px}
+  .month-view .month-person-event.calendar-block{padding:2px 2px;min-height:17px}
+  .month-view .month-person-event .event-block-title{font-size:7.2px}
+  .week-person-head span{font-size:9px;padding:5px 6px}
+  .week-person-lane{padding:4px}
+  .week-person-lane .week-event.calendar-block{padding:6px 6px;min-height:42px}
+  .week-person-lane .event-block-title{font-size:10px}
+  .week-person-lane .event-block-meta{font-size:8.5px}
+  .day-person-head{grid-template-columns:50px 1fr 1fr}
+  .day-person-head span{font-size:9px;padding:6px}
+  .split-all-day{grid-template-columns:50px minmax(0,1fr)}
+  .all-day-shared{padding-left:58px}
+}
+
+/* =========================================================
+   RosterHome v0.2.1 · lifestyle planning / summary build
+   ========================================================= */
+:root{--briefing-solid:#2f9b8f;--simple-good:#234c3d;--simple-partial:#433a24;--simple-busy:#3b2630}
+button.event.calendar-block.briefing,.timeline-event.briefing{background:var(--briefing-solid)}
+.legend-swatch.briefing{background:var(--briefing-solid)}
+.legend-swatch.simple-together{background:#3aa675}.legend-swatch.simple-busy{background:#b6536a}
+
+/* Simple mode: one shared outcome per day, no operational clutter. */
+.simple-day-status{display:flex;flex-direction:column;justify-content:center;gap:3px;width:100%;min-height:54px;border:1px solid transparent;border-radius:10px;padding:8px;background:#182033;color:#fff;text-align:left}
+.simple-day-status.together{background:linear-gradient(145deg,#24513f,#1b3d31);border-color:rgba(123,224,179,.26)}
+.simple-day-status.partial{background:linear-gradient(145deg,#4a4027,#3a321f);border-color:rgba(255,213,122,.25)}
+.simple-day-status.busy{background:linear-gradient(145deg,#422a34,#34212a);border-color:rgba(255,139,158,.22)}
+.simple-day-status.unknown{background:#171e2d;border-color:var(--line);color:var(--muted)}
+.simple-status-main{display:block;font-size:11px;font-weight:780;line-height:1.2}.simple-status-time{display:block;font-size:9.5px;opacity:.82;font-variant-numeric:tabular-nums}
+.month-view .simple-day-status{min-height:44px;margin-top:5px;padding:6px}.month-view .simple-status-main{font-size:9px}.month-view .simple-status-time{font-size:8px}
+.simple-week-wrap{padding:8px}.simple-week-wrap .simple-day-status{min-height:86px}.simple-week-wrap .simple-status-main{font-size:13px}.simple-week-wrap .simple-status-time{font-size:11px}
+.simple-day-card{max-width:680px;margin:0 auto;padding:30px 22px;border:1px solid var(--line);border-radius:20px;background:#111827;text-align:center;box-shadow:0 12px 36px rgba(0,0,0,.15)}
+.simple-day-card.together{background:linear-gradient(180deg,rgba(47,112,83,.36),rgba(17,24,39,.95));border-color:rgba(123,224,179,.3)}
+.simple-day-card.partial{background:linear-gradient(180deg,rgba(109,88,39,.3),rgba(17,24,39,.95));border-color:rgba(255,213,122,.28)}
+.simple-day-card.busy{background:linear-gradient(180deg,rgba(112,54,68,.26),rgba(17,24,39,.95));border-color:rgba(255,139,158,.26)}
+.simple-day-card.today{box-shadow:inset 0 0 0 1px rgba(121,167,255,.35),0 12px 36px rgba(0,0,0,.15)}
+.simple-day-icon{font-size:42px;line-height:1;margin-bottom:8px}.simple-day-card h2{margin:0 0 7px;font-size:25px}.simple-day-card>p{margin:0 auto 18px;max-width:520px;color:var(--muted)}
+.simple-day-window{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:12px 0;border-top:1px solid rgba(255,255,255,.08);text-align:left}.simple-day-window span{color:var(--muted);font-size:12px}.simple-day-window b{font-size:13px;text-align:right}.simple-switch-note{margin:16px 0 0!important;font-size:11px!important}
+
+/* Personal planning rules */
+.rules-subtitle{margin:20px 0 8px!important;font-size:13px!important;color:#e6ebf7}.personal-rules{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.personal-rule-card{padding:13px;border:1px solid var(--line);border-radius:14px;background:#101827}.personal-rule-card.p1-rule{border-top:3px solid var(--p1-solid)}.personal-rule-card.p2-rule{border-top:3px solid var(--p2-solid)}.personal-rule-card h3{margin:0 0 8px}.rules-help{margin:10px 2px 0;font-size:11px;line-height:1.5}
+
+/* Interactive summary */
+.summary-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.stat-button{width:100%;border:1px solid var(--line);color:var(--text);text-align:left;transition:transform .15s ease,border-color .15s ease,background .15s ease}.stat-button:hover,.stat-button:focus-visible{transform:translateY(-1px);border-color:#536a96;outline:none}.stat-button.active{background:#19243a;border-color:#6683b8;box-shadow:inset 0 0 0 1px rgba(121,167,255,.14)}.stat-button small{display:block;margin-top:5px;color:#77859f;font-size:9.5px}.summary-drill-card{min-height:120px}.summary-drill-row{display:grid;grid-template-columns:92px minmax(0,1fr) 18px;gap:10px;align-items:center;width:100%;padding:10px 0;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--text);text-align:left}.summary-drill-row:last-child{border-bottom:0}.summary-drill-row span{color:var(--muted);font-size:11px}.summary-drill-row b{font-size:11.5px;font-weight:650}.summary-drill-row i{color:var(--muted);font-size:20px;font-style:normal;text-align:right}.summary-row-button{width:100%;border:0;background:transparent;color:var(--text);text-align:left;cursor:pointer}.summary-row-button:hover,.summary-drill-row:hover{background:rgba(255,255,255,.025)}
+.workload-compare{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.workload-person{padding:13px;border:1px solid var(--line);border-radius:14px;background:#101827}.workload-person.p0{border-top:3px solid var(--p1-solid)}.workload-person.p1{border-top:3px solid var(--p2-solid)}.workload-person h4{margin:0 0 8px;font-size:14px}.workload-person>div{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-top:1px solid rgba(255,255,255,.055)}.workload-person span{color:var(--muted);font-size:10.5px}.workload-person b{font-size:11.5px}
+
+@media(max-width:700px){
+  .summary-stats{grid-template-columns:1fr 1fr}.personal-rules{grid-template-columns:1fr}.workload-compare{grid-template-columns:1fr 1fr}
+}
+@media(max-width:560px){
+  .month-view .simple-day-status{padding:4px;min-height:40px;border-radius:7px}.month-view .simple-status-main{font-size:7.5px}.month-view .simple-status-time{font-size:6.8px}
+  .simple-day-card{padding:24px 16px}.simple-day-card h2{font-size:22px}.simple-day-window{gap:8px}.simple-day-window b{font-size:12px}
+  .summary-stats{grid-template-columns:1fr 1fr}.stat-button{padding:11px}.stat-button b{font-size:19px}.workload-compare{grid-template-columns:1fr}
+  .summary-drill-row{grid-template-columns:72px minmax(0,1fr) 14px}
+}

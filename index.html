@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b1020" />
   <title>RosterHome</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=0.2.1f" />
+  <link rel="stylesheet" href="styles.css?v=0.2.1h" />
 </head>
 <body>
 <div class="app">
@@ -40,17 +40,17 @@
       </div>
       <div class="calendar-clarity-row">
         <div class="calendar-density-switch" role="group" aria-label="Nivel de detalle">
-          <button class="density-mode active" data-calendar-density="simple">Esencial</button>
+          <button class="density-mode active" data-calendar-density="simple">Simple</button>
           <button class="density-mode" data-calendar-density="full">Completo</button>
         </div>
-        <span class="clarity-hint" id="clarityHint">Solo lo importante para planificar el día</span>
+        <span class="clarity-hint" id="clarityHint">Un único resultado compartido por día</span>
       </div>
 
       <details class="legend-guide compact-guide">
         <summary>ⓘ Leyenda y términos</summary>
         <div class="legend-guide-body">
           <div class="legend-section">
-            <h3>Bloques del calendario</h3>
+            <h3>Bloques del calendario</h3><p class="legend-note"><b>Distribución:</b> el Perfil 1 aparece siempre a la izquierda y el Perfil 2 siempre a la derecha. Los eventos compartidos ocupan ambos lados.</p>
             <div class="legend-grid">
               <div class="legend-item"><span class="legend-swatch p1"></span><div><b><span id="legendGuideP1">Perfil 1</span> · Duty / roster</b><small>Actividad del primer perfil: duty, vuelo o estado importado desde CrewLink.</small></div></div>
               <div class="legend-item"><span class="legend-swatch p2"></span><div><b><span id="legendGuideP2">Perfil 2</span> · Duty / roster</b><small>Actividad del segundo perfil.</small></div></div>
@@ -59,6 +59,9 @@
               <div class="legend-item"><span class="legend-swatch recovery"></span><div><b>Recovery parcial</b><small>Bloque de recuperación doméstica generado por las reglas de RosterHome tras un duty exigente.</small></div></div>
               <div class="legend-item"><span class="legend-swatch full"></span><div><b>Recovery completo</b><small>Recuperación doméstica de mayor duración. No equivale a un descanso mínimo FTL.</small></div></div>
               <div class="legend-item"><span class="legend-swatch couple"></span><div><b>Ventana juntos</b><small>Periodo potencial en el que ninguno está bloqueado por duty o sueño protegido.</small></div></div>
+              <div class="legend-item"><span class="legend-swatch briefing"></span><div><b>Briefing</b><small>Bloque personal antes del primer sector. La antelación se configura por persona.</small></div></div>
+              <div class="legend-item"><span class="legend-swatch simple-together"></span><div><b>Día para pasar juntos</b><small>En vista Simple hay al menos 6 h continuas potenciales para los dos.</small></div></div>
+              <div class="legend-item"><span class="legend-swatch simple-busy"></span><div><b>Día ocupado</b><small>No aparece una ventana continua de 2 h para ambos entre 08:00 y 23:00.</small></div></div>
             </div>
           </div>
 
@@ -188,12 +191,31 @@
     <div class="card">
       <h2>⚙️ Reglas de casa</h2>
       <div class="notice">RosterHome detecta automáticamente si cada PDF CrewLink está en UTC o en horas locales por aeropuerto. El calendario de convivencia se muestra en vuestra zona horaria de casa.</div>
+      <h3 class="rules-subtitle">Sueño y rutina antes del duty</h3>
       <div class="rulegrid">
         <div><label>Zona horaria de casa</label><input id="homeTz" value="Europe/Athens"></div>
         <div><label>Horas mínimas de sueño</label><input id="sleepHours" type="number" min="6" max="12" step="0.25" value="8"></div>
         <div><label>Quiet hours antes de dormir (min)</label><input id="quietLead" type="number" min="0" max="120" value="30"></div>
         <div><label>Trayecto casa → report (min)</label><input id="commuteOut" type="number" min="0" max="180" value="0"></div>
         <div><label>Trayecto C/O → casa (min)</label><input id="commuteHome" type="number" min="0" max="180" value="0"></div>
+      </div>
+
+      <div class="personal-rules">
+        <div class="personal-rule-card p1-rule">
+          <h3 id="rulesName0">👨‍✈️ Miguel</h3>
+          <label>Prepararse y vestirse antes de salir (min)</label><input id="prepMinutes0" type="number" min="0" max="180" value="20">
+          <label>Briefing antes del primer vuelo (min)</label><input id="briefingLead0" type="number" min="0" max="240" value="105">
+        </div>
+        <div class="personal-rule-card p2-rule">
+          <h3 id="rulesName1">👩‍✈️ Nicole</h3>
+          <label>Prepararse y vestirse antes de salir (min)</label><input id="prepMinutes1" type="number" min="0" max="180" value="40">
+          <label>Briefing antes del primer vuelo (min)</label><input id="briefingLead1" type="number" min="0" max="240" value="105">
+        </div>
+      </div>
+      <p class="rules-help muted">El sueño protegido se ajusta al compromiso más temprano antes del vuelo (briefing o salida hacia el report), además del tiempo personal de preparación de cada uno. El briefing es un bloque personal y no sustituye el C/I de CrewLink.</p>
+
+      <h3 class="rules-subtitle">Recovery y horarios de casa</h3>
+      <div class="rulegrid">
         <div><label>Duty largo desde (h)</label><input id="longDuty" type="number" min="8" max="16" step="0.5" value="10"></div>
         <div><label>Duty muy largo desde (h)</label><input id="veryLongDuty" type="number" min="9" max="18" step="0.5" value="12"></div>
         <div><label>Recovery parcial (h)</label><input id="partialRecovery" type="number" min="2" max="24" value="6"></div>
@@ -207,11 +229,20 @@
   </section>
 
   <section id="summaryView" class="view">
-    <div class="stats" id="stats"></div>
+    <div class="card summary-intro">
+      <h2>📊 Resumen del mes</h2>
+      <p class="muted">Las tarjetas son interactivas. Toca una estadística para ver exactamente qué días la forman y luego abre cualquier día para verlo en el calendario.</p>
+    </div>
+    <div class="stats summary-stats" id="stats" style="margin-top:12px"></div>
+    <div class="card summary-drill-card" style="margin-top:12px">
+      <h3 id="summaryDrillTitle">Detalle</h3>
+      <div id="summaryDrilldown" class="summary-list"></div>
+    </div>
     <div class="grid two" style="margin-top:16px">
       <div class="card"><h3>❤️ Mejores ventanas juntos</h3><div id="bestWindows" class="summary-list"></div></div>
       <div class="card"><h3>⚠️ Días que requieren coordinación</h3><div id="coordination" class="summary-list"></div></div>
     </div>
+    <div class="card" style="margin-top:16px"><h3>⚖️ Carga del mes</h3><p class="muted">Comparación rápida para ver quién llega con más carga, noches o recoveries.</p><div id="workloadCompare" class="workload-compare"></div></div>
   </section>
 
   <div class="footer">MVP local · RosterHome v0.2.1 · El módulo FTL está preparado pero todavía no calcula legalidad.</div>
@@ -232,7 +263,8 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="roster-parser.js?v=0.2.1f"></script>
-<script src="app.js?v=0.2.1f"></script>
+<script src="roster-parser.js?v=0.2.1h"></script>
+<script src="app.js?v=0.2.1h"></script>
+<script src="enhancements.js?v=0.2.1h"></script>
 </body>
 </html>
