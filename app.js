@@ -159,6 +159,15 @@ function allDerived(){
       if(r) events.push({kind:'recovery',person:pi,start:r.start,end:r.end,label:r.level==='full'?'Recovery completo':'Recovery parcial',level:r.level,reasons:r.reasons,score:r.score,raw:d});
     }
   }));
+  // Safety invariant: never present a sleep block as normal if it truly overlaps
+  // one of that person's duties. This should not happen in a coherent roster; if it
+  // does, make the conflict explicit instead of implying the person can sleep at work.
+  const dutyEvents=events.filter(x=>x.kind==='duty');
+  for(const sleep of events.filter(x=>x.kind==='sleep')){
+    const conflicts=dutyEvents.filter(d=>d.person===sleep.person && new Date(d.start)<new Date(sleep.end) && new Date(d.end)>new Date(sleep.start));
+    if(conflicts.length){ sleep.sleepConflict=true; sleep.conflictDuties=conflicts.map(x=>x.raw?.route||x.label||'Duty'); }
+  }
+
   // Final rendering guard: identical derived blocks should never appear twice,
   // even if old localStorage data contained duplicates from an earlier parser.
   const seen=new Map();
@@ -209,7 +218,7 @@ function eventsForDay(key, derived, includeQuiet=true){
 function registerEvent(e){ const id=`ev-${++eventCounter}`; renderedEvents.set(id,e); return id; }
 function eventClass(e){
   if(e.kind==='duty'||e.kind==='status') return e.person===1?'p2':'';
-  if(e.kind==='sleep') return 'sleep';
+  if(e.kind==='sleep') return e.sleepConflict?'sleep conflict':'sleep';
   if(e.kind==='quiet') return 'quiet';
   if(e.kind==='recovery') return `recovery ${e.level==='full'?'full':''}`;
   if(e.kind==='couple') return 'couple';
@@ -233,7 +242,7 @@ function eventBlockTitle(e, compact=false){
   }
   if(e.kind==='duty') return `${person} · ${e.raw?.route||e.raw?.base||'Duty'}`;
   if(e.kind==='status') return `${person} · ${e.label}`;
-  if(e.kind==='sleep') return `🌙 Sueño · ${person}`;
+  if(e.kind==='sleep') return e.sleepConflict?`⚠️ Sueño en conflicto · ${person}`:`🌙 Sueño · ${person}`;
   if(e.kind==='quiet') return `🔕 Quiet · ${person}`;
   if(e.kind==='recovery') return `${e.level==='full'?'🔴':'🟡'} Recovery · ${person}`;
   if(e.kind==='couple') return '❤️ Tiempo juntos';
@@ -339,13 +348,45 @@ function localMinuteOfDay(date){
   return Number(o.hour)*60+Number(o.minute);
 }
 function timelineSegment(e,key){
-  const dayStart=utcForLocalDayTime(key,'00:00'), dayEnd=utcForLocalDayTime(addDaysKey(key,1),'00:00');
-  const start=new Date(Math.max(+new Date(e.start),+dayStart));
-  const end=new Date(Math.min(+new Date(e.end),+dayEnd));
-  if(end<=start) return null;
-  const startMin=+new Date(e.start)<=+dayStart?0:localMinuteOfDay(start);
-  const endMin=+new Date(e.end)>=+dayEnd?1440:localMinuteOfDay(end);
-  return {e,startMin,endMin:Math.max(endMin,startMin+1),lane:0,laneCount:1};
+  // Position events from their *actual overlap* with this local calendar day.
+  // Using elapsed milliseconds instead of the formatted clock time avoids Safari/
+  // timezone edge cases that could pin a late-night event at 00:00 and make it
+  // look as if sleep and a duty were happening simultaneously.
+  const dayStart=utcForLocalDayTime(key,'00:00');
+  const dayEnd=utcForLocalDayTime(addDaysKey(key,1),'00:00');
+  const eventStart=+new Date(e.start), eventEnd=+new Date(e.end);
+  const startMs=Math.max(eventStart,+dayStart), endMs=Math.min(eventEnd,+dayEnd);
+  if(endMs<=startMs) return null;
+  const dayMs=+dayEnd-(+dayStart);
+  const startMin=((startMs-(+dayStart))/dayMs)*1440;
+  const endMin=((endMs-(+dayStart))/dayMs)*1440;
+  return {
+    e,
+    start:new Date(startMs),
+    end:new Date(endMs),
+    startMin:Math.max(0,Math.min(1440,startMin)),
+    endMin:Math.max(startMin+1,Math.min(1440,endMin)),
+    startsBeforeDay:eventStart < +dayStart,
+    endsAfterDay:eventEnd > +dayEnd,
+    lane:0,laneCount:1
+  };
+}
+function segmentTimeRange(seg){
+  if(seg.startsBeforeDay && seg.endsAfterDay) return '00:00–24:00 · continúa';
+  if(seg.startsBeforeDay) return `00:00–${timeLocal(seg.end)} · desde ayer`;
+  if(seg.endsAfterDay) return `${timeLocal(seg.start)}–24:00 · sigue mañana`;
+  return `${timeLocal(seg.start)}–${timeLocal(seg.end)}`;
+}
+function segmentBlockMeta(seg){
+  const e=seg.e, when=segmentTimeRange(seg);
+  if(e.kind==='duty'){
+    const raw=e.raw||{}, bits=[when];
+    if(raw.type&&raw.type!=='N/A') bits.push(raw.type);
+    if(state.calendarDensity==='full'&&raw.dt) bits.push(`DT ${raw.dt}`);
+    return bits.filter(Boolean).join(' · ');
+  }
+  if(e.kind==='recovery') return `${when}${e.level==='full'?' · completo':' · parcial'}`;
+  return when;
 }
 function assignTimelineLanes(segments){
   const xs=[...segments].sort((a,b)=>a.startMin-b.startMin||a.endMin-b.endMin);
@@ -393,7 +434,7 @@ function renderDayCalendar(derived){
       const e=seg.e, id=registerEvent(e), top=seg.startMin/60*H, rawHeight=(seg.endMin-seg.startMin)/60*H, height=Math.max(rawHeight,30);
       const width=100/seg.laneCount, left=seg.lane*width;
       const compact=height<48?' compact':'';
-      html+=`<button type="button" class="timeline-event ${eventClass(e)}${compact}" data-event-id="${id}" style="top:${top}px;height:${height}px;left:calc(${left}% + 6px);width:calc(${width}% - 10px)" aria-label="Ver detalle de ${esc(eventText(e))}"><span class="timeline-event-title">${esc(eventBlockTitle(e))}</span><span class="timeline-event-meta">${esc(eventBlockMeta(e))}</span>${height>=72?`<span class="timeline-event-sub">${esc(eventSubtitle(e))}</span>`:''}</button>`;
+      html+=`<button type="button" class="timeline-event ${eventClass(e)}${compact}" data-event-id="${id}" style="top:${top}px;height:${height}px;left:calc(${left}% + 6px);width:calc(${width}% - 10px)" aria-label="Ver detalle de ${esc(eventText(e))}"><span class="timeline-event-title">${esc(eventBlockTitle(e))}</span><span class="timeline-event-meta">${esc(segmentBlockMeta(seg))}</span>${height>=72?`<span class="timeline-event-sub">${esc(eventSubtitle(e))}</span>`:''}</button>`;
     }
     html+='</div></div>';
   }
@@ -423,7 +464,7 @@ function eventSubtitle(e){
     return bits.join(' · ');
   }
   if(e.kind==='status') return 'Estado del roster';
-  if(e.kind==='sleep') return `${state.rules.sleepHours} h antes del report`;
+  if(e.kind==='sleep') return e.sleepConflict?'Coincide realmente con un duty · revisar roster':`${state.rules.sleepHours} h antes del report`;
   if(e.kind==='quiet') return `${state.rules.quietLead} min antes del sueño protegido`;
   if(e.kind==='recovery') return e.reasons?.length?e.reasons.join(' · '):'Recovery calculado por las reglas de casa';
   if(e.kind==='couple') return `${((e.end-e.start)/3600000).toFixed(1)} h potenciales juntos`;
@@ -478,7 +519,8 @@ function eventDetailHtml(e){
   }
   if(e.kind==='sleep'){
     const report=e.raw?.checkIn?localDateTime(e.raw.checkIn):'—';
-    return `<div class="detail-section"><h3>Qué indica</h3><p class="detail-explainer">Bloque de sueño protegido calculado hacia atrás desde el report para asegurar el objetivo de descanso configurado.</p>${detailRow('Persona',state.people[e.person].name)}${detailRow('Desde',localDateTime(e.start))}${detailRow('Hasta',localDateTime(e.end))}${detailRow('Objetivo',`${state.rules.sleepHours} h`)}${detailRow('Report relacionado',report)}${detailRow('Ruta relacionada',e.raw?.route||'Duty')}</div>`;
+    const warning=e.sleepConflict?`<div class="warning-box"><b>⚠️ Conflicto real detectado</b><br>Este bloque de sueño se solapa temporalmente con ${esc((e.conflictDuties||[]).join(', ')||'un duty')}. RosterHome no lo considera una ventana de descanso válida; revisa la importación o las reglas.</div>`:'';
+    return `${warning}<div class="detail-section"><h3>Qué indica</h3><p class="detail-explainer">Bloque de sueño protegido calculado hacia atrás desde el report para asegurar el objetivo de descanso configurado.</p>${detailRow('Persona',state.people[e.person].name)}${detailRow('Desde',localDateTime(e.start))}${detailRow('Hasta',localDateTime(e.end))}${detailRow('Objetivo',`${state.rules.sleepHours} h`)}${detailRow('Report relacionado',report)}${detailRow('Ruta relacionada',e.raw?.route||'Duty')}</div>`;
   }
   if(e.kind==='quiet'){
     return `<div class="detail-section"><h3>Qué indica</h3><p class="detail-explainer">Periodo previo al sueño protegido en el que conviene reducir ruido, llamadas, luces y actividad doméstica.</p>${detailRow('Persona',state.people[e.person].name)}${detailRow('Desde',localDateTime(e.start))}${detailRow('Hasta',localDateTime(e.end))}${detailRow('Duración',`${state.rules.quietLead} min`)}</div>`;
