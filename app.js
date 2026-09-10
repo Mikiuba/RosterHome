@@ -16,18 +16,45 @@ const DEFAULT_STATE = {
 let state = loadState();
 let renderedEvents = new Map();
 let eventCounter = 0;
+const STATE_SCHEMA_VERSION = 3;
+
+function dutyIdentity(d){
+  if(!d) return '';
+  if(d.kind==='status') return `status|${d.date||''}|${d.status||''}`;
+  // Same report time + same route/base is the same roster duty even if a later
+  // import changes C/O or metadata. Keep the latest/richest copy.
+  return `duty|${d.checkIn||''}|${d.route||d.base||''}`;
+}
+function dutyRichness(d){
+  if(!d) return 0;
+  return [d.checkout,d.route,d.type,d.dt,d.fdp,d.ft].filter(Boolean).length + ((d.flights||[]).length*2);
+}
+function dedupeDuties(list){
+  const map=new Map();
+  for(const d of (list||[])){
+    const k=dutyIdentity(d); if(!k) continue;
+    const prev=map.get(k);
+    if(!prev || dutyRichness(d)>=dutyRichness(prev)) map.set(k,d);
+  }
+  return [...map.values()].sort((a,b)=>(a.checkIn||a.date||'').localeCompare(b.checkIn||b.date||''));
+}
 
 function clone(x){ return JSON.parse(JSON.stringify(x)); }
 function loadState(){
   try{
     const saved=JSON.parse(localStorage.getItem('rosterhome-state')||'{}');
     const base=clone(DEFAULT_STATE);
-    const people=[0,1].map(i=>({...base.people[i], ...(saved.people?.[i]||{})}));
+    const people=[0,1].map(i=>{
+      const person={...base.people[i], ...(saved.people?.[i]||{})};
+      person.duties=dedupeDuties(person.duties||[]);
+      return person;
+    });
     const rules={...base.rules, ...(saved.rules||{})};
     const month=saved.month || base.month;
     return {
       ...base,
       ...saved,
+      schemaVersion:STATE_SCHEMA_VERSION,
       people,
       rules,
       month,
@@ -36,7 +63,7 @@ function loadState(){
     };
   }catch(e){ return clone(DEFAULT_STATE); }
 }
-function saveState(){ localStorage.setItem('rosterhome-state', JSON.stringify(state)); }
+function saveState(){ state.schemaVersion=STATE_SCHEMA_VERSION; localStorage.setItem('rosterhome-state', JSON.stringify(state)); }
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function ms(h){ return h*3600000; }
@@ -118,7 +145,7 @@ function sleepForDuty(d){
 
 function allDerived(){
   const events=[];
-  state.people.forEach((p,pi)=>p.duties.forEach(d=>{
+  state.people.forEach((p,pi)=>dedupeDuties(p.duties).forEach(d=>{
     if(d.kind==='duty'){
       events.push({kind:'duty',person:pi,start:new Date(d.checkIn),end:d.checkout?new Date(d.checkout):new Date(new Date(d.checkIn).getTime()+ms(8)),label:dutyLabel(d),raw:d});
       const s=sleepForDuty(d);
@@ -130,7 +157,14 @@ function allDerived(){
       if(r) events.push({kind:'recovery',person:pi,start:r.start,end:r.end,label:r.level==='full'?'Recovery completo':'Recovery parcial',level:r.level,reasons:r.reasons,score:r.score,raw:d});
     }
   }));
-  return events;
+  // Final rendering guard: identical derived blocks should never appear twice,
+  // even if old localStorage data contained duplicates from an earlier parser.
+  const seen=new Map();
+  for(const e of events){
+    const k=[e.kind,e.person,e.start?.toISOString?.()||'',e.end?.toISOString?.()||'',e.raw?.route||'',e.label||''].join('|');
+    seen.set(k,e);
+  }
+  return [...seen.values()];
 }
 
 function mergeIntervals(intervals){
@@ -179,18 +213,49 @@ function eventClass(e){
   if(e.kind==='couple') return 'couple';
   return '';
 }
-function eventText(e){
-  if(e.kind==='status') return `${state.people[e.person].name} · ${e.label}`;
-  if(e.kind==='duty') return `${state.people[e.person].name} · ${e.label}`;
-  if(e.kind==='sleep') return `🌙 ${state.people[e.person].name} ${timeLocal(e.start)}–${timeLocal(e.end)}`;
-  if(e.kind==='quiet') return `🔇 ${state.people[e.person].name} · ${timeLocal(e.start)}–${timeLocal(e.end)}`;
-  if(e.kind==='recovery') return `${e.level==='full'?'🔴':'🟡'} ${state.people[e.person].name} recovery · ${timeLocal(e.start)}–${timeLocal(e.end)}`;
-  if(e.kind==='couple') return `❤️ ${timeLocal(e.start)}–${timeLocal(e.end)}`;
+function eventTimeRange(e){
+  if(e.kind==='status') return 'Todo el día';
+  if(e.start&&e.end) return `${timeLocal(e.start)}–${timeLocal(e.end)}`;
+  return '';
+}
+function eventBlockTitle(e, compact=false){
+  const person=e.person==null?'':state.people[e.person].name;
+  const initial=person ? person.trim().charAt(0).toUpperCase() : '';
+  if(compact){
+    if(e.kind==='duty') return e.raw?.route||e.raw?.base||'Duty';
+    if(e.kind==='status') return e.label;
+    if(e.kind==='sleep') return `🌙 ${initial}`;
+    if(e.kind==='quiet') return `🔕 ${initial}`;
+    if(e.kind==='recovery') return `${e.level==='full'?'🔴':'🟡'} Rec · ${initial}`;
+    if(e.kind==='couple') return '❤️ Juntos';
+  }
+  if(e.kind==='duty') return `${person} · ${e.raw?.route||e.raw?.base||'Duty'}`;
+  if(e.kind==='status') return `${person} · ${e.label}`;
+  if(e.kind==='sleep') return `🌙 Sueño · ${person}`;
+  if(e.kind==='quiet') return `🔕 Quiet · ${person}`;
+  if(e.kind==='recovery') return `${e.level==='full'?'🔴':'🟡'} Recovery · ${person}`;
+  if(e.kind==='couple') return '❤️ Tiempo juntos';
   return e.label||'Evento';
 }
-function renderEventButton(e,extraClass=''){
+function eventBlockMeta(e){
+  const when=eventTimeRange(e);
+  if(e.kind==='duty'){
+    const raw=e.raw||{}; const bits=[when];
+    if(raw.type&&raw.type!=='N/A') bits.push(raw.type);
+    if(raw.dt) bits.push(`DT ${raw.dt}`);
+    return bits.filter(Boolean).join(' · ');
+  }
+  if(e.kind==='recovery') return `${when}${e.level==='full'?' · completo':' · parcial'}`;
+  if(e.kind==='couple') return `${when} · ${((e.end-e.start)/3600000).toFixed(1)} h`;
+  return when;
+}
+function eventText(e){
+  const meta=eventBlockMeta(e);
+  return `${eventBlockTitle(e)}${meta?' · '+meta:''}`;
+}
+function renderEventButton(e,extraClass='',context='month'){
   const id=registerEvent(e);
-  return `<button type="button" class="event ${eventClass(e)} ${extraClass}" data-event-id="${id}" aria-label="Ver detalle de ${esc(eventText(e))}">${esc(eventText(e))}</button>`;
+  return `<button type="button" class="event calendar-block ${eventClass(e)} ${extraClass}" data-event-id="${id}" aria-label="Ver detalle de ${esc(eventText(e))}"><span class="event-block-title">${esc(eventBlockTitle(e,context==='month'))}</span><span class="event-block-meta">${esc(eventBlockMeta(e))}</span></button>`;
 }
 
 function syncCalendarModeButtons(){
@@ -199,6 +264,8 @@ function syncCalendarModeButtons(){
 function renderCalendar(){
   renderedEvents=new Map(); eventCounter=0;
   $('legendP1').textContent=state.people[0].name||'Perfil 1'; $('legendP2').textContent=state.people[1].name||'Perfil 2';
+  if($('legendGuideP1')) $('legendGuideP1').textContent=state.people[0].name||'Perfil 1';
+  if($('legendGuideP2')) $('legendGuideP2').textContent=state.people[1].name||'Perfil 2';
   syncCalendarModeButtons();
   const derived=allDerived();
   if(state.calendarMode==='week') renderWeekCalendar(derived);
@@ -235,30 +302,80 @@ function renderWeekCalendar(derived){
     const key=addDaysKey(start,i); const ev=eventsForDay(key,derived,true);
     const weekday=localDayLabel(key,{weekday:'short'}); const date=localDayLabel(key,{day:'numeric',month:'short'});
     html+=`<section class="week-day ${key===todayKey?'today':''}"><button type="button" class="week-day-head" data-open-day="${key}"><span>${esc(weekday)}</span><b>${esc(date)}</b></button><div class="week-events">`;
-    html+=ev.length?ev.map(e=>renderEventButton(e,'week-event')).join(''):'<div class="empty-day">Sin eventos</div>';
+    html+=ev.length?ev.map(e=>renderEventButton(e,'week-event','week')).join(''):'<div class="empty-day">Sin eventos</div>';
     html+='</div></section>';
   }
   html+='</div>';
   $('calendar').innerHTML=html;
 }
 
+function localMinuteOfDay(date){
+  const parts=new Intl.DateTimeFormat('en-GB',{timeZone:state.rules.homeTz,hour:'2-digit',minute:'2-digit',hour12:false}).formatToParts(new Date(date));
+  const o=Object.fromEntries(parts.map(x=>[x.type,x.value]));
+  return Number(o.hour)*60+Number(o.minute);
+}
+function timelineSegment(e,key){
+  const dayStart=utcForLocalDayTime(key,'00:00'), dayEnd=utcForLocalDayTime(addDaysKey(key,1),'00:00');
+  const start=new Date(Math.max(+new Date(e.start),+dayStart));
+  const end=new Date(Math.min(+new Date(e.end),+dayEnd));
+  if(end<=start) return null;
+  const startMin=+new Date(e.start)<=+dayStart?0:localMinuteOfDay(start);
+  const endMin=+new Date(e.end)>=+dayEnd?1440:localMinuteOfDay(end);
+  return {e,startMin,endMin:Math.max(endMin,startMin+1),lane:0,laneCount:1};
+}
+function assignTimelineLanes(segments){
+  const xs=[...segments].sort((a,b)=>a.startMin-b.startMin||a.endMin-b.endMin);
+  let active=[], group=[], groupId=0;
+  const groups=new Map();
+  for(const seg of xs){
+    active=active.filter(a=>a.endMin>seg.startMin);
+    if(!active.length){ group=[]; groupId++; }
+    const used=new Set(active.map(a=>a.lane)); let lane=0; while(used.has(lane)) lane++;
+    seg.lane=lane; seg.groupId=groupId; active.push(seg); group.push(seg);
+    groups.set(groupId,Math.max(groups.get(groupId)||1,lane+1));
+  }
+  xs.forEach(s=>s.laneCount=groups.get(s.groupId)||1);
+  return xs;
+}
 function renderDayCalendar(derived){
   const key=state.focusDate; const ev=eventsForDay(key,derived,true); const todayKey=dayKey(new Date());
   $('monthTitle').textContent=localDayLabel(key,{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   $('calendar').className='calendar day-view';
+  const allDay=ev.filter(e=>e.kind==='status');
+  const segments=assignTimelineLanes(ev.filter(e=>e.kind!=='status'&&e.start&&e.end).map(e=>timelineSegment(e,key)).filter(Boolean));
+  const H=64, dayHeight=24*H;
   let html=`<div class="day-agenda ${key===todayKey?'today':''}"><div class="day-agenda-head"><span>${ev.length} ${ev.length===1?'evento':'eventos'}</span><b>${esc(state.rules.homeTz)}</b></div>`;
-  if(!ev.length) html+='<div class="empty-agenda"><strong>Día despejado</strong><span>No hay duties, sueño, recovery ni ventanas calculadas para este día.</span></div>';
-  else {
-    html+='<div class="agenda-list">';
-    ev.forEach(e=>{
-      const id=registerEvent(e); const timed=e.start&&e.end;
-      const when=e.kind==='status'?'Todo el día':timed?`${timeLocal(e.start)}–${timeLocal(e.end)}`:'';
-      html+=`<button type="button" class="agenda-item ${eventClass(e)}" data-event-id="${id}"><span class="agenda-time">${esc(when)}</span><span class="agenda-main"><b>${esc(eventTitle(e))}</b><small>${esc(eventSubtitle(e))}</small></span><span class="agenda-chevron">›</span></button>`;
-    });
-    html+='</div>';
+  if(allDay.length){
+    html+='<div class="all-day-row"><span class="all-day-label">Todo el día</span><div class="all-day-events">';
+    html+=allDay.map(e=>renderEventButton(e,'all-day-event','day')).join('');
+    html+='</div></div>';
+  }
+  if(!segments.length && !allDay.length){
+    html+='<div class="empty-agenda"><strong>Día despejado</strong><span>No hay duties, sueño, recovery ni ventanas calculadas para este día.</span></div>';
+  }else if(segments.length){
+    html+=`<div class="timeline-scroll"><div class="timeline-canvas" style="height:${dayHeight}px">`;
+    for(let h=0;h<24;h++){
+      html+=`<div class="timeline-hour-label" style="top:${h*H-8}px">${String(h).padStart(2,'0')}:00</div><div class="timeline-hour-line" style="top:${h*H}px"></div>`;
+    }
+    if(key===todayKey){
+      const nowMin=localMinuteOfDay(new Date());
+      html+=`<div class="timeline-now" style="top:${nowMin/60*H}px"><span></span></div>`;
+    }
+    for(const seg of segments){
+      const e=seg.e, id=registerEvent(e), top=seg.startMin/60*H, rawHeight=(seg.endMin-seg.startMin)/60*H, height=Math.max(rawHeight,30);
+      const width=100/seg.laneCount, left=seg.lane*width;
+      const compact=height<48?' compact':'';
+      html+=`<button type="button" class="timeline-event ${eventClass(e)}${compact}" data-event-id="${id}" style="top:${top}px;height:${height}px;left:calc(${left}% + 6px);width:calc(${width}% - 10px)" aria-label="Ver detalle de ${esc(eventText(e))}"><span class="timeline-event-title">${esc(eventBlockTitle(e))}</span><span class="timeline-event-meta">${esc(eventBlockMeta(e))}</span>${height>=72?`<span class="timeline-event-sub">${esc(eventSubtitle(e))}</span>`:''}</button>`;
+    }
+    html+='</div></div>';
   }
   html+='</div>';
   $('calendar').innerHTML=html;
+  const scroll=$('calendar').querySelector('.timeline-scroll');
+  if(scroll&&segments.length){
+    const first=Math.min(...segments.map(s=>s.startMin));
+    requestAnimationFrame(()=>{ scroll.scrollTop=Math.max(0,(first/60)*H-H); });
+  }
 }
 
 function eventTitle(e){
@@ -337,6 +454,19 @@ function eventDetailHtml(e){
   return '<div class="muted">Sin más información para este evento.</div>';
 }
 
+
+function renderFtl(){
+  const all=state.people.flatMap(p=>p.duties||[]);
+  const duties=all.filter(d=>d.kind==='duty');
+  const withRoster=state.people.filter(p=>(p.duties||[]).length>0).length;
+  if($('ftlDuties')) $('ftlDuties').textContent=String(duties.length);
+  if($('ftlPeople')) $('ftlPeople').textContent=`${withRoster}/2`;
+  if($('ftlPeriod')){
+    const dates=duties.map(d=>String(d.date||d.checkIn||'').slice(0,10)).filter(Boolean).sort();
+    $('ftlPeriod').textContent=dates.length?`${dates[0].slice(8,10)}/${dates[0].slice(5,7)} – ${dates.at(-1).slice(8,10)}/${dates.at(-1).slice(5,7)}`:'—';
+  }
+}
+
 function renderSummary(){
   const [y,m]=state.month.split('-').map(Number); const days=new Date(y,m,0).getDate(); const derived=allDerived(); let windows=[];
   for(let d=1;d<=days;d++){const key=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const w=coupleWindowForDay(key,derived); if(w) windows.push({key,...w,h:(w.end-w.start)/3600000});}
@@ -368,14 +498,30 @@ async function extractPdfText(file){
 }
 
 function mergeParsed(personIndex, parsed, source){
-  const old=state.people[personIndex].duties||[]; const incoming=parsed.duties||[];
-  const map=new Map(); [...old,...incoming].forEach(d=>{const k=d.kind==='duty'?`${d.kind}|${d.checkIn}|${d.checkout||''}|${d.route||''}`:`${d.kind}|${d.date}|${d.status}`; map.set(k,d);});
-  state.people[personIndex].duties=[...map.values()].sort((a,b)=>(a.checkIn||a.date).localeCompare(b.checkIn||b.date)); state.people[personIndex].source=source;
+  const old=dedupeDuties(state.people[personIndex].duties||[]);
+  const incoming=dedupeDuties(parsed.duties||[]);
+
+  // A roster import is authoritative for the period printed in that roster.
+  // Older versions appended to localStorage, so stale/misparsed copies survived
+  // every re-import and generated duplicated duty/sleep/recovery blocks.
+  let preserved=old;
+  if(parsed.period){
+    const startKey=parsed.period.start.toISOString().slice(0,10);
+    const endKey=parsed.period.end.toISOString().slice(0,10);
+    preserved=old.filter(d=>{
+      const key=d.kind==='duty' ? (d.date || String(d.checkIn||'').slice(0,10)) : d.date;
+      return !key || key<startKey || key>endKey;
+    });
+  }
+
+  state.people[personIndex].duties=dedupeDuties([...preserved,...incoming]);
+  state.people[personIndex].source=source;
   if(parsed.crew?.name && !state.people[personIndex].name) state.people[personIndex].name=parsed.crew.name;
   if(parsed.period){const s=parsed.period.start; state.month=`${s.getUTCFullYear()}-${String(s.getUTCMonth()+1).padStart(2,'0')}`; state.focusDate=parsed.period.start.toISOString().slice(0,10);}
   saveState(); syncInputs(); renderCalendar();
   return incoming.filter(x=>x.kind==='duty').length;
 }
+
 
 async function handleFile(personIndex,file){
   const box=$(`status${personIndex}`); box.className='status'; box.textContent='Leyendo roster…';
@@ -383,7 +529,7 @@ async function handleFile(personIndex,file){
     const text=file.name.toLowerCase().endsWith('.pdf')?await extractPdfText(file):await file.text();
     const parsed=RosterParser.parseCrewLinkText(text); const count=mergeParsed(personIndex,parsed,file.name);
     if(!count) throw new Error('No he encontrado ningún C/I/C/O reconocible. Prueba el fallback de texto o pásame este formato para añadirlo.');
-    box.className='status ok'; box.textContent=`✓ ${count} duties importados · ${parsed.period?parsed.period.start.toISOString().slice(0,7):'periodo detectado'} · ${file.name}`;
+    box.className='status ok'; box.textContent=`✓ ${count} duties importados · periodo reemplazado sin duplicados · ${parsed.period?parsed.period.start.toISOString().slice(0,7):'periodo detectado'} · ${file.name}`;
   }catch(e){box.className='status err';box.textContent='⚠️ '+e.message;}
 }
 
@@ -427,7 +573,7 @@ function exportIcs(){
 }
 
 // UI wiring
-document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$(b.dataset.view).classList.add('active'); if(b.dataset.view==='summaryView')renderSummary();}));
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$(b.dataset.view).classList.add('active'); if(b.dataset.view==='summaryView')renderSummary(); if(b.dataset.view==='ftlView')renderFtl();}));
 document.querySelectorAll('[data-calendar-mode]').forEach(b=>b.addEventListener('click',()=>setCalendarMode(b.dataset.calendarMode)));
 [0,1].forEach(i=>{$(`file${i}`).addEventListener('change',e=>e.target.files[0]&&handleFile(i,e.target.files[0]));$(`name${i}`).addEventListener('change',e=>{state.people[i].name=e.target.value.trim()||`Perfil ${i+1}`;saveState();renderCalendar();});});
 document.querySelectorAll('[data-clear]').forEach(b=>b.addEventListener('click',()=>{const i=Number(b.dataset.clear);state.people[i].duties=[];state.people[i].source=null;saveState();$(`status${i}`).textContent='Roster borrado.';renderCalendar();}));

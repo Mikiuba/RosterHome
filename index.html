@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b1020" />
   <title>RosterHome</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=0.2.1b" />
 </head>
 <body>
 <div class="app">
@@ -18,6 +18,7 @@
   <nav class="tabs">
     <button class="tab active" data-view="calendarView">Calendario</button>
     <button class="tab" data-view="importView">Importar roster</button>
+    <button class="tab" data-view="ftlView">FTL</button>
     <button class="tab" data-view="rulesView">Reglas</button>
     <button class="tab" data-view="summaryView">Resumen</button>
   </nav>
@@ -44,6 +45,60 @@
         <span><i class="dot rec"></i>Recovery</span>
         <span><i class="dot couple"></i>Ventana juntos</span>
       </div>
+
+      <details class="legend-guide">
+        <summary>📖 Leyenda y significado de los términos</summary>
+        <div class="legend-guide-body">
+          <div class="legend-section">
+            <h3>Bloques del calendario</h3>
+            <div class="legend-grid">
+              <div class="legend-item"><span class="legend-swatch p1"></span><div><b><span id="legendGuideP1">Perfil 1</span> · Duty / roster</b><small>Actividad del primer perfil: duty, vuelo o estado importado desde CrewLink.</small></div></div>
+              <div class="legend-item"><span class="legend-swatch p2"></span><div><b><span id="legendGuideP2">Perfil 2</span> · Duty / roster</b><small>Actividad del segundo perfil.</small></div></div>
+              <div class="legend-item"><span class="legend-swatch sleep"></span><div><b>Sueño protegido</b><small>Ventana calculada hacia atrás desde el report para reservar las horas de sueño configuradas.</small></div></div>
+              <div class="legend-item"><span class="legend-swatch quiet"></span><div><b>Quiet hours</b><small>Periodo previo al sueño protegido en el que conviene reducir ruido, luces, llamadas y actividad doméstica.</small></div></div>
+              <div class="legend-item"><span class="legend-swatch recovery"></span><div><b>Recovery parcial</b><small>Bloque de recuperación doméstica generado por las reglas de RosterHome tras un duty exigente.</small></div></div>
+              <div class="legend-item"><span class="legend-swatch full"></span><div><b>Recovery completo</b><small>Recuperación doméstica de mayor duración. No equivale a un descanso mínimo FTL.</small></div></div>
+              <div class="legend-item"><span class="legend-swatch couple"></span><div><b>Ventana juntos</b><small>Periodo potencial en el que ninguno está bloqueado por duty o sueño protegido.</small></div></div>
+            </div>
+          </div>
+
+          <div class="legend-section">
+            <h3>Estados del roster</h3>
+            <div class="term-grid">
+              <div><b>OFF</b><span>Día libre indicado por el roster.</span></div>
+              <div><b>ROFF</b><span>Requested Off Day: día libre solicitado.</span></div>
+              <div><b>RES</b><span>Reserved for Duty: reservado para servicio.</span></div>
+              <div><b>ABS</b><span>Ausencia/actividad no voladora indicada por CrewLink.</span></div>
+              <div><b>EARLY</b><span>Duty clasificado por CrewLink como temprano.</span></div>
+              <div><b>LATE</b><span>Duty clasificado por CrewLink como tardío.</span></div>
+              <div><b>NIGHT</b><span>Duty clasificado por CrewLink como nocturno.</span></div>
+              <div><b>N/A</b><span>Sin clasificación especial indicada en ese campo.</span></div>
+            </div>
+          </div>
+
+          <div class="legend-section">
+            <h3>Datos que aparecen al abrir un duty</h3>
+            <div class="term-grid">
+              <div><b>C/I</b><span>Check-in / report: inicio del duty.</span></div>
+              <div><b>C/O</b><span>Check-out: final del duty.</span></div>
+              <div><b>FT</b><span>Flight Time: tiempo de vuelo indicado en el roster.</span></div>
+              <div><b>DT</b><span>Duty Time: duración total del duty indicada por CrewLink.</span></div>
+              <div><b>FDT</b><span>Flight Duty Time: valor mostrado por CrewLink para la actividad de vuelo.</span></div>
+              <div><b>FDP</b><span>Flight Duty Period: periodo de servicio de vuelo mostrado en el roster.</span></div>
+              <div><b>max</b><span>Límite máximo que CrewLink muestra asociado al duty. RosterHome todavía no lo valida como FTL.</span></div>
+              <div><b>SDT</b><span>Campo de tiempo de duty programado mostrado por CrewLink.</span></div>
+              <div><b>RT</b><span>Campo de descanso posterior mostrado por CrewLink. Su interpretación normativa se añadirá al módulo FTL.</span></div>
+              <div><b>BRK</b><span>Intervalo/break mostrado por CrewLink entre actividades.</span></div>
+              <div><b>DP</b><span>Campo CrewLink conservado para análisis posterior; aún no se interpreta normativamente.</span></div>
+              <div><b>xFDP</b><span>Campo CrewLink relacionado con FDP que RosterHome aún no usa para decidir legalidad.</span></div>
+              <div><b>ACC</b><span>Campo de aclimatación/base mostrado por CrewLink; se usará más adelante en FTL.</span></div>
+              <div><b>LN</b><span>Campo CrewLink conservado del duty; pendiente de integrar en las reglas FTL.</span></div>
+            </div>
+            <p class="legend-note">La leyenda describe cómo RosterHome presenta los datos. Los campos FTL que todavía no están implementados se muestran sin convertirlos en una decisión de legalidad.</p>
+          </div>
+        </div>
+      </details>
+
       <div class="calendar" id="calendar"></div>
     </div>
   </section>
@@ -77,6 +132,49 @@
     </div>
   </section>
 
+  <section id="ftlView" class="view">
+    <div class="card ftl-card">
+      <div class="ftl-head">
+        <div>
+          <div class="ftl-kicker">Flight Time Limitations</div>
+          <h2>FTL</h2>
+          <p class="muted">Estructura preparada para analizar límites y legalidad del roster cuando carguemos vuestro esquema FTL.</p>
+        </div>
+        <span class="ftl-status">Motor FTL · no configurado</span>
+      </div>
+
+      <div class="notice ftl-warning"><b>Importante:</b> esta versión no determina si un duty o un roster es legal. No usa todavía límites EASA ni OM-A de compañía para tomar decisiones operacionales.</div>
+
+      <div class="ftl-overview">
+        <div class="ftl-metric"><span>Duties importados</span><b id="ftlDuties">0</b></div>
+        <div class="ftl-metric"><span>Perfiles con roster</span><b id="ftlPeople">0/2</b></div>
+        <div class="ftl-metric"><span>Periodo visible</span><b id="ftlPeriod">—</b></div>
+        <div class="ftl-metric pending"><span>Resultado FTL</span><b>Pendiente</b></div>
+      </div>
+
+      <div class="ftl-section">
+        <h3>Qué analizará esta pestaña</h3>
+        <div class="ftl-grid">
+          <article><b>FDP máximo</b><span>Comparación entre FDP programado/real y el máximo aplicable.</span></article>
+          <article><b>Descanso mínimo</b><span>Comprobación del descanso entre duties y recuperación requerida.</span></article>
+          <article><b>Límites acumulados</b><span>Horas de vuelo y duty en las ventanas temporales que definamos.</span></article>
+          <article><b>EARLY / LATE / NIGHT</b><span>Tratamiento de horarios disruptivos y secuencias consecutivas.</span></article>
+          <article><b>Aclimatación y WOCL</b><span>Aplicación de zona horaria, estado de aclimatación y ventana circadiana.</span></article>
+          <article><b>Standby / RES</b><span>Reglas específicas para reservas, standby y extensión del duty.</span></article>
+        </div>
+      </div>
+
+      <div class="ftl-section">
+        <h3>Resultado futuro por duty</h3>
+        <div class="ftl-result-preview">
+          <div><span>Legalidad</span><b>—</b><small>Pendiente de reglas</small></div>
+          <div><span>Factor limitante</span><b>—</b><small>Pendiente de reglas</small></div>
+          <div><span>Margen restante</span><b>—</b><small>Pendiente de reglas</small></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section id="rulesView" class="view">
     <div class="card">
       <h2>⚙️ Reglas de casa</h2>
@@ -107,7 +205,7 @@
     </div>
   </section>
 
-  <div class="footer">MVP local · RosterHome v0.2 · No sustituye límites FTL ni decisiones de fatiga operacional.</div>
+  <div class="footer">MVP local · RosterHome v0.2.1 · El módulo FTL está preparado pero todavía no calcula legalidad.</div>
 </div>
 
 <div id="eventModal" class="modal hidden" aria-hidden="true">
@@ -125,7 +223,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="roster-parser.js"></script>
-<script src="app.js"></script>
+<script src="roster-parser.js?v=0.2.1b"></script>
+<script src="app.js?v=0.2.1b"></script>
 </body>
 </html>
