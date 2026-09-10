@@ -25,9 +25,17 @@
   <section id="calendarView" class="view active">
     <div class="card">
       <div class="calendar-head">
-        <button class="btn ghost" id="prevMonth">←</button>
+        <button class="btn ghost icon-btn" id="prevMonth" aria-label="Periodo anterior">←</button>
         <div class="month-title" id="monthTitle"></div>
-        <button class="btn ghost" id="nextMonth">→</button>
+        <div class="calendar-nav-actions">
+          <button class="btn ghost today-btn" id="todayBtn">Hoy</button>
+          <button class="btn ghost icon-btn" id="nextMonth" aria-label="Periodo siguiente">→</button>
+        </div>
+      </div>
+      <div class="calendar-view-switch" role="group" aria-label="Vista del calendario">
+        <button class="view-mode active" data-calendar-mode="month">Mes</button>
+        <button class="view-mode" data-calendar-mode="week">Semana</button>
+        <button class="view-mode" data-calendar-mode="day">Día</button>
       </div>
       <div class="legend">
         <span><i class="dot p1"></i><span id="legendP1">Persona 1</span></span>
@@ -99,7 +107,21 @@
     </div>
   </section>
 
-  <div class="footer">MVP local · RosterHome v0.1 · No sustituye límites FTL ni decisiones de fatiga operacional.</div>
+  <div class="footer">MVP local · RosterHome v0.2 · No sustituye límites FTL ni decisiones de fatiga operacional.</div>
+</div>
+
+<div id="eventModal" class="modal hidden" aria-hidden="true">
+  <div class="modal-backdrop" data-close-modal></div>
+  <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="eventModalTitle">
+    <div class="modal-head">
+      <div>
+        <div class="modal-kicker" id="eventModalKicker">Detalle</div>
+        <h2 id="eventModalTitle">Evento</h2>
+      </div>
+      <button class="modal-close" type="button" data-close-modal aria-label="Cerrar">×</button>
+    </div>
+    <div id="eventModalBody" class="modal-body"></div>
+  </section>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
