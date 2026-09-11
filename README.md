@@ -1,4 +1,4 @@
-# RosterHome v0.3.4
+# RosterHome v0.3.5
 
 Actualización FTL sobre la base estable v0.3.2.3.
 

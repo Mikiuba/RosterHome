@@ -17,7 +17,7 @@ const DEFAULT_STATE = {
 let BOOT_LOCAL_RAW=null;
 try{BOOT_LOCAL_RAW=localStorage.getItem('rosterhome-state');}catch(_){ }
 const BOOT_HAD_LOCAL_STATE = !!BOOT_LOCAL_RAW;
-const STATE_SCHEMA_VERSION = 6;
+const STATE_SCHEMA_VERSION = 7;
 let durableStorageReady = false;
 let state = loadState();
 let renderedEvents = new Map();
@@ -701,6 +701,12 @@ function ftlProfileBase(duties){
 function ftlTypeLabel(flags){
   const xs=[];if(flags?.night)xs.push('NIGHT');if(flags?.early)xs.push('EARLY');if(flags?.late)xs.push('LATE');return xs.join(' + ')||'NORMAL';
 }
+function ftlEffectiveFlags(d,calculated){
+  // CrewLink's TYPE is the authoritative disruptive classification carried by
+  // the roster. This fallback is essential for rosters persisted by older
+  // RosterHome builds, which may not contain sourceCheckInTime/sourceCheckOutTime.
+  return window.RosterHomeFTL.resolveDisruptiveFlags(d?.type,calculated);
+}
 function ftlStatusWord(status){return status==='bad'?'NON-COMPLIANT':status==='review'?'REVIEW':'COMPLIANT';}
 function ftlCheck(label,text,status='ok'){
   return `<div class="ftl-check"><span>${esc(label)}</span><b>${esc(text)}</b><i class="${status}">${status==='bad'?'✕':status==='review'?'!':'✓'}</i></div>`;
@@ -745,7 +751,7 @@ function renderFtl(){
     let rows='';
     ds.forEach((d,i)=>{
       const tz=ftlReferenceZone(d,base),civilStart=ftlSourceCivil(d,'start',tz),civilEnd=ftlSourceCivil(d,'end',tz);
-      const flags=engine.classifyDisruptiveDuty(civilStart,civilEnd),sectors=Math.max(1,d.flights?.length||1);
+      const calculatedFlags=engine.classifyDisruptiveDuty(civilStart,civilEnd),flags=ftlEffectiveFlags(d,calculatedFlags),sectors=Math.max(1,d.flights?.length||1);
       const actualFdp=ftlMinutes(d.fdp)??ftlMinutes(d.fdt),basicMax=engine.table2MaxForCivil(civilStart,sectors),crewMax=ftlMinutes(d.max);
       const xfdp=ftlMinutes(d.xfdp);
       const checks=[];let status='ok';
@@ -757,9 +763,9 @@ function renderFtl(){
       }else checks.push(['FDP básico','Datos insuficientes para comparar','review']),status='review';
       if(crewMax!=null&&basicMax!=null&&Math.abs(crewMax-basicMax)>1){checks.push(['CrewLink max',`${ftlFormatMinutes(crewMax)} vs Tabla 2 ${ftlFormatMinutes(basicMax)}`,'review']);if(status==='ok')status='review';}
 
-      checks.push(['Disruptive',`${ftlTypeLabel(flags)} · ref. ${d.acc||base||d.base||'—'} (${tz})`,'ok']);
+      checks.push(['Disruptive',`${ftlTypeLabel(flags)} · ${flags.source==='crewlink'?'CrewLink':'calculado'} · ref. ${d.acc||base||d.base||'—'} (${tz})`,'ok']);
       const crewType=String(d.type||'').toUpperCase();
-      if(crewType&&crewType!=='N/A'&&crewType!=='NORMAL'&&!crewType.includes(flags.primaryType)){
+      if(flags.source!=='crewlink'&&crewType&&crewType!=='N/A'&&crewType!=='NORMAL'&&!crewType.includes(flags.primaryType)){
         checks.push(['TYPE CrewLink',`${crewType} ≠ cálculo ${flags.primaryType}`,'review']);if(status==='ok')status='review';
       }
 
@@ -778,12 +784,16 @@ function renderFtl(){
             {start:ftlSourceCivil(d,'start',baseTz),end:ftlSourceCivil(d,'end',baseTz)},
             {atHomeOrOperatingBase:true}
           );
-          if(transition.requiresLocalNight){
-            const trStatus=transition.compliant?'ok':'bad';
+          const previousFlags=ftlEffectiveFlags(prev,transition.previous);
+          const nextFlags=ftlEffectiveFlags(d,transition.next);
+          const requiresLocalNight=(previousFlags.late||previousFlags.night)&&nextFlags.early;
+          const transitionCompliant=!requiresLocalNight||transition.localNights>=1;
+          if(requiresLocalNight){
+            const trStatus=transitionCompliant?'ok':'bad';
             checks.push(['LATE/NIGHT → EARLY',`${transition.localNights} local night${transition.localNights===1?'':'s'} entre FDPs`,trStatus]);
             if(trStatus==='bad')status='bad';
           }else{
-            checks.push(['Transición',`${ftlTypeLabel(transition.previous)} → ${ftlTypeLabel(transition.next)} · no exige Local Night`,'ok']);
+            checks.push(['Transición',`${ftlTypeLabel(previousFlags)} → ${ftlTypeLabel(nextFlags)} · no exige Local Night`,'ok']);
           }
         }
       }else checks.push(['Descanso previo','No hay duty anterior dentro del roster importado','review']);
@@ -989,4 +999,4 @@ on(document,'keydown',e=>{if(e.key==='Escape'&&$('eventModal')&&!$('eventModal')
 // Navigation is bound once above. Keep a single source of truth for taps.
 try{syncInputs();}catch(err){console.error('[RosterHome] No se pudieron sincronizar inputs',err);}
 try{renderCalendar();}catch(err){console.error('[RosterHome] Render inicial en fallback',err);}
-if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./service-worker.js?v=0.3.4').catch(()=>{});
+if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./service-worker.js?v=0.3.5',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{});

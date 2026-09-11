@@ -1,6 +1,6 @@
 /*
  * RosterHome FTL engine — Corendon Airlines Europe OM-A Ch. 7 core rules.
- * Version 0.3.4
+ * Version 0.3.5
  *
  * Implemented here:
  * - Disruptive schedules (EARLY TYPE): EARLY 05:00-05:59, LATE 23:00-01:59,
@@ -48,6 +48,15 @@
     }
     let primaryType='NORMAL';if(night)primaryType='NIGHT';else if(early)primaryType='EARLY';else if(late)primaryType='LATE';
     return{early,late,night,disruptive:early||late||night,primaryType};
+  }
+
+  function resolveDisruptiveFlags(rosterType,calculated){
+    const type=String(rosterType||'').toUpperCase();
+    const flags={early:/\bEARLY\b/.test(type),late:/\bLATE\b/.test(type),night:/\bNIGHT\b/.test(type)};
+    if(flags.early||flags.late||flags.night){
+      return {...flags,disruptive:true,primaryType:flags.night?'NIGHT':flags.early?'EARLY':'LATE',source:'crewlink'};
+    }
+    return {...calculated,source:'calculated'};
   }
 
   function countLocalNights(restStart,restEnd){
@@ -120,5 +129,5 @@
     ].map(x=>({...x,compliant:x.actual<=x.limit}))
   };}
 
-  return{parseCivil,civilISO,durationMinutes,classifyDisruptiveDuty,countLocalNights,validateDisruptiveTransition,minimumRestMinutes,validateMinimumRest,table2MaxFdpMinutes,table2MaxForCivil,formatMinutes,cumulativeAt,validateCumulative};
+  return{parseCivil,civilISO,durationMinutes,classifyDisruptiveDuty,resolveDisruptiveFlags,countLocalNights,validateDisruptiveTransition,minimumRestMinutes,validateMinimumRest,table2MaxFdpMinutes,table2MaxForCivil,formatMinutes,cumulativeAt,validateCumulative};
 });
