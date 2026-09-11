@@ -63,7 +63,7 @@
       try{await put(STATE_KEY,snapshot);window.dispatchEvent(new CustomEvent('rh-storage-saved'));}
       catch(err){console.error('[RosterHome] No se pudo guardar en IndexedDB',err);window.dispatchEvent(new CustomEvent('rh-storage-error',{detail:err}));}
     };
-    if(immediate) return commit();
+    if(immediate) return commit().catch(err=>{console.warn('[RosterHome] Guardado durable en fallback',err);});
     pendingTimer=setTimeout(commit,120);
   }
 

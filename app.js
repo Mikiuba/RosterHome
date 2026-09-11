@@ -369,14 +369,19 @@ function renderCalendar(){
 }
 
 function queueCalendarRender(){
-  syncCalendarModeButtons();
-  syncCalendarDensityButtons();
-  const cal=$('calendar'); if(cal) cal.classList.add('view-switching');
-  if(calendarRenderFrame) cancelAnimationFrame(calendarRenderFrame);
-  calendarRenderFrame=requestAnimationFrame(()=>{
-    calendarRenderFrame=0;
-    renderCalendar();
-  });
+  // v0.3.2.2: never disable pointer interaction while changing view.
+  // On iOS/PWA a delayed rAF could leave the calendar in a non-interactive
+  // state if the app was backgrounded mid-frame. Rendering synchronously here
+  // is cheap enough with the existing caches and is substantially more robust.
+  try{ syncCalendarModeButtons(); }catch(_){ }
+  try{ syncCalendarDensityButtons(); }catch(_){ }
+  const cal=$('calendar'); if(cal) cal.classList.remove('view-switching');
+  if(calendarRenderFrame){ try{cancelAnimationFrame(calendarRenderFrame);}catch(_){ } calendarRenderFrame=0; }
+  try{ renderCalendar(); }
+  catch(err){
+    console.error('[RosterHome] Error renderizando calendario',err);
+    if(cal) cal.classList.remove('view-switching');
+  }
 }
 
 function renderMonthCalendar(derived){
@@ -815,18 +820,48 @@ function exportIcs(){
   const blob=new Blob([ics],{type:'text/calendar;charset=utf-8'}); const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`RosterHome-${state.month}.ics`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
 
-// UI wiring
-document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$(b.dataset.view).classList.add('active'); if(b.dataset.view==='summaryView')requestAnimationFrame(()=>renderSummary()); if(b.dataset.view==='ftlView')requestAnimationFrame(()=>renderFtl());}));
-document.querySelectorAll('[data-calendar-mode]').forEach(b=>b.addEventListener('click',()=>setCalendarMode(b.dataset.calendarMode)));
-document.querySelectorAll('[data-calendar-density]').forEach(b=>b.addEventListener('click',()=>{ if(state.calendarDensity===b.dataset.calendarDensity)return; state.calendarDensity=b.dataset.calendarDensity; saveState(); queueCalendarRender(); }));
-[0,1].forEach(i=>{$(`file${i}`).addEventListener('change',e=>e.target.files[0]&&handleFile(i,e.target.files[0]));$(`name${i}`).addEventListener('change',e=>{state.people[i].name=e.target.value.trim()||`Perfil ${i+1}`;saveState();renderCalendar();});});
-document.querySelectorAll('[data-clear]').forEach(b=>b.addEventListener('click',()=>{const i=Number(b.dataset.clear);state.people[i].duties=[];state.people[i].source=null;saveState();$(`status${i}`).textContent='Roster borrado.';if($(`audit${i}`))$(`audit${i}`).innerHTML='';renderCalendar();}));
-$('importText').addEventListener('click',()=>{try{const i=Number($('pastePerson').value),parsed=RosterParser.parseCrewLinkText($('pasteText').value);renderImportAudit(i,parsed);validateBeforeMerge(parsed);const n=mergeParsed(i,parsed,'texto pegado');$('pasteText').value='';alert(`${n} duties importados y validados.`);}catch(e){alert(e.message);}});
-$('saveRules').addEventListener('click',()=>{try{new Intl.DateTimeFormat('es',{timeZone:$('homeTz').value}).format();readRules();alert('Reglas guardadas.');}catch(e){alert('Zona horaria no válida. Usa, por ejemplo, Europe/Athens o Europe/Madrid.');}});
-$('prevMonth').addEventListener('click',()=>shiftPeriod(-1)); $('nextMonth').addEventListener('click',()=>shiftPeriod(1)); $('todayBtn').addEventListener('click',goToday); $('exportIcs').addEventListener('click',exportIcs);
-$('calendar').addEventListener('click',e=>{const eventBtn=e.target.closest('[data-event-id]');if(eventBtn){openEventDetails(eventBtn.dataset.eventId);return;}const dayBtn=e.target.closest('[data-open-day]');if(dayBtn)openDay(dayBtn.dataset.openDay);});
-document.querySelectorAll('[data-close-modal]').forEach(x=>x.addEventListener('click',closeEventDetails));
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('eventModal').classList.contains('hidden'))closeEventDetails();});
+// UI wiring — v0.3.2.2 resilient binding
+function on(el,event,handler,options){
+  if(el && typeof el.addEventListener==='function') el.addEventListener(event,handler,options);
+}
 
-syncInputs();
-if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
+document.querySelectorAll('.tab').forEach(b=>on(b,'click',()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  const target=$(b.dataset.view); if(target) target.classList.add('active');
+  if(b.dataset.view==='summaryView' && typeof renderSummary==='function') setTimeout(()=>{try{renderSummary();}catch(e){console.error(e)}},0);
+  if(b.dataset.view==='ftlView' && typeof renderFtl==='function') setTimeout(()=>{try{renderFtl();}catch(e){console.error(e)}},0);
+}));
+document.querySelectorAll('[data-calendar-mode]').forEach(b=>on(b,'click',()=>{try{setCalendarMode(b.dataset.calendarMode);}catch(e){console.error(e)}}));
+document.querySelectorAll('[data-calendar-density]').forEach(b=>on(b,'click',()=>{
+  try{if(state.calendarDensity===b.dataset.calendarDensity)return;state.calendarDensity=b.dataset.calendarDensity;saveState();queueCalendarRender();}catch(e){console.error(e)}
+}));
+[0,1].forEach(i=>{
+  on($(`file${i}`),'change',e=>e.target.files?.[0]&&handleFile(i,e.target.files[0]));
+  on($(`name${i}`),'change',e=>{try{state.people[i].name=e.target.value.trim()||`Perfil ${i+1}`;saveState();renderCalendar();}catch(err){console.error(err)}});
+});
+document.querySelectorAll('[data-clear]').forEach(b=>on(b,'click',()=>{try{const i=Number(b.dataset.clear);state.people[i].duties=[];state.people[i].source=null;saveState();if($(`status${i}`))$(`status${i}`).textContent='Roster borrado.';if($(`audit${i}`))$(`audit${i}`).innerHTML='';renderCalendar();}catch(e){console.error(e)}}));
+on($('importText'),'click',()=>{try{const i=Number($('pastePerson').value),parsed=RosterParser.parseCrewLinkText($('pasteText').value);renderImportAudit(i,parsed);validateBeforeMerge(parsed);const n=mergeParsed(i,parsed,'texto pegado');$('pasteText').value='';alert(`${n} duties importados y validados.`);}catch(e){alert(e.message);}});
+on($('saveRules'),'click',()=>{try{new Intl.DateTimeFormat('es',{timeZone:$('homeTz').value}).format();readRules();alert('Reglas guardadas.');}catch(e){alert('Zona horaria no válida. Usa, por ejemplo, Europe/Athens o Europe/Madrid.');}});
+on($('prevMonth'),'click',()=>{try{shiftPeriod(-1)}catch(e){console.error(e)}});
+on($('nextMonth'),'click',()=>{try{shiftPeriod(1)}catch(e){console.error(e)}});
+on($('todayBtn'),'click',()=>{try{goToday()}catch(e){console.error(e)}});
+on($('exportIcs'),'click',()=>{try{exportIcs()}catch(e){console.error(e)}});
+on($('calendar'),'click',e=>{try{const eventBtn=e.target.closest('[data-event-id]');if(eventBtn){openEventDetails(eventBtn.dataset.eventId);return;}const dayBtn=e.target.closest('[data-open-day]');if(dayBtn)openDay(dayBtn.dataset.openDay);}catch(err){console.error(err)}});
+document.querySelectorAll('[data-close-modal]').forEach(x=>on(x,'click',closeEventDetails));
+on(document,'keydown',e=>{if(e.key==='Escape'&&$('eventModal')&&!$('eventModal').classList.contains('hidden'))closeEventDetails();});
+
+// Independent delegated navigation fallback. Even if a feature module throws,
+// the shell tabs must remain tappable on iOS.
+on(document,'click',e=>{
+  const tab=e.target.closest?.('.tab[data-view]');
+  if(tab){
+    document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===tab));
+    document.querySelectorAll('.view').forEach(x=>x.classList.toggle('active',x.id===tab.dataset.view));
+  }
+});
+
+try{syncInputs();}catch(err){console.error('[RosterHome] No se pudieron sincronizar inputs',err);}
+try{renderCalendar();}catch(err){console.error('[RosterHome] Render inicial en fallback',err);}
+if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./service-worker.js?v=0.3.2.2').catch(()=>{});

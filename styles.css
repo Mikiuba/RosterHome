@@ -308,7 +308,7 @@ button.event.calendar-block.briefing,.timeline-event.briefing{background:var(--b
    ========================================================= */
 #calendar{min-width:0;overflow:hidden;overflow-anchor:none;contain:layout paint}
 .calendar.week-view,.calendar.day-view{grid-template-columns:none}
-.calendar.view-switching{pointer-events:none}
+.calendar.view-switching{pointer-events:auto}
 .calendar-view-switch,.calendar-density-switch{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 .view-mode,.density-mode{touch-action:manipulation}
 .timeline-scroll{overflow-anchor:none}
@@ -370,3 +370,7 @@ button.event.calendar-block.recovery.full{
 .storage-status-grid span{display:block;font-size:11px;color:var(--muted,#6f7785);margin-bottom:5px}.storage-status-grid b{display:block;font-size:13px;line-height:1.3;overflow-wrap:anywhere}
 .storage-help{font-size:12px;line-height:1.45}.storage-actions{margin-top:10px}
 @media(max-width:700px){.storage-heading{align-items:center}.storage-status-grid{grid-template-columns:1fr}.storage-actions{display:grid;grid-template-columns:1fr 1fr}.storage-actions .btn{width:100%}}
+
+/* v0.3.2.2 interaction safety */
+.calendar,.tabs,.calendar-view-switch,.calendar-density-switch{touch-action:manipulation}
+button{touch-action:manipulation;-webkit-tap-highlight-color:rgba(255,255,255,.08)}
