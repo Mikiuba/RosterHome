@@ -1,4 +1,4 @@
-/* RosterHome v0.2.1 · lifestyle planning build */
+/* RosterHome v0.3 · lifestyle planning build */
 (function(){
   // New per-person planning defaults. Existing users keep their saved values.
   if(state.rules.briefingLead0 == null) state.rules.briefingLead0=105;
@@ -8,6 +8,19 @@
   saveState();
 
   let selectedSummaryMetric='togetherDays';
+  let derivedCacheSignature='';
+  let derivedCacheValue=null;
+  let summaryCacheSignature='';
+  let summaryCacheValue=null;
+  const dayStatusCache=new WeakMap();
+  const mealCache=new WeakMap();
+  const coupleWindowCache=new WeakMap();
+  const eventsDayCache=new WeakMap();
+
+  function derivedStateSignature(){
+    const dutyBits=state.people.map(p=>(p.duties||[]).map(d=>[d.kind,d.date,d.checkIn,d.checkout,d.route,d.status,d.type,d.dt,d.ft,(d.flights||[]).map(f=>[f.flightNo,f.dep,f.arr,f.depTime,f.arrTime,f.depDayOffset,f.arrDayOffset]) ]));
+    return JSON.stringify([dutyBits,state.rules]);
+  }
 
   function numericPersonRule(base,pi,fallback=0){
     const v=Number(state.rules[`${base}${pi}`]);
@@ -74,6 +87,8 @@
   };
 
   allDerived=function(){
+    const sig=derivedStateSignature();
+    if(derivedCacheValue && sig===derivedCacheSignature) return derivedCacheValue;
     const events=[];
     state.people.forEach((p,pi)=>dedupeDuties(p.duties).forEach(d=>{
       if(d.kind==='duty'){
@@ -99,7 +114,10 @@
       const k=[e.kind,e.person,e.start?.toISOString?.()||'',e.end?.toISOString?.()||'',e.raw?.route||'',e.label||''].join('|');
       seen.set(k,e);
     }
-    return [...seen.values()];
+    derivedCacheSignature=sig;
+    derivedCacheValue=[...seen.values()];
+    summaryCacheSignature=''; summaryCacheValue=null;
+    return derivedCacheValue;
   };
 
   function operationalStatusOnDay(key){
@@ -122,40 +140,52 @@
     return gaps.filter(g=>(g.end-g.start)>=minMs(minMinutes));
   }
   coupleWindowForDay=function(key,derived){
-    const gaps=sharedFreeIntervalsForDay(key,derived,120);
-    return gaps.sort((a,b)=>(b.end-b.start)-(a.end-a.start))[0]||null;
+    let cache=coupleWindowCache.get(derived); if(!cache){cache=new Map();coupleWindowCache.set(derived,cache);} if(cache.has(key))return cache.get(key);
+    const gaps=sharedFreeIntervalsForDay(key,derived,120),result=gaps.sort((a,b)=>(b.end-b.start)-(a.end-a.start))[0]||null;
+    cache.set(key,result); return result;
   };
   function dayPlanStatus(key,derived){
-    if(!state.people[0].duties.length || !state.people[1].duties.length) return {level:'unknown',label:'Falta un roster',emoji:'＋',detail:'Importa los dos rosters para comparar el día.',best:null,totalHours:0};
-    const gaps=sharedFreeIntervalsForDay(key,derived,30),sorted=[...gaps].sort((a,b)=>(b.end-b.start)-(a.end-a.start)),best=sorted[0]||null;
-    const bestH=best?(best.end-best.start)/3600000:0,totalHours=gaps.reduce((s,g)=>s+(g.end-g.start)/3600000,0);
-    if(bestH>=6) return {level:'together',label:'Día para pasar juntos',emoji:'❤️',detail:`Mejor ventana ${timeLocal(best.start)}–${timeLocal(best.end)}`,best,totalHours};
-    if(bestH>=2) return {level:'partial',label:'Coincidimos un rato',emoji:'🫶',detail:`Mejor ventana ${timeLocal(best.start)}–${timeLocal(best.end)}`,best,totalHours};
-    return {level:'busy',label:'Día ocupado',emoji:'🔒',detail:operationalStatusOnDay(key)?'Hay standby/reserva u otra actividad que condiciona el día.':'No aparece una ventana continua de 2 h para los dos.',best,totalHours};
+    let cache=dayStatusCache.get(derived); if(!cache){cache=new Map();dayStatusCache.set(derived,cache);} if(cache.has(key))return cache.get(key);
+    let result;
+    if(!state.people[0].duties.length || !state.people[1].duties.length) result={level:'unknown',label:'Falta un roster',emoji:'＋',detail:'Importa los dos rosters para comparar el día.',best:null,totalHours:0};
+    else{
+      const gaps=sharedFreeIntervalsForDay(key,derived,30),sorted=[...gaps].sort((a,b)=>(b.end-b.start)-(a.end-a.start)),best=sorted[0]||null;
+      const bestH=best?(best.end-best.start)/3600000:0,totalHours=gaps.reduce((sum,g)=>sum+(g.end-g.start)/3600000,0);
+      if(bestH>=6) result={level:'together',label:'Día para pasar juntos',emoji:'❤️',detail:`Mejor ventana ${timeLocal(best.start)}–${timeLocal(best.end)}`,best,totalHours};
+      else if(bestH>=2) result={level:'partial',label:'Coincidimos un rato',emoji:'🫶',detail:`Mejor ventana ${timeLocal(best.start)}–${timeLocal(best.end)}`,best,totalHours};
+      else result={level:'busy',label:'Día ocupado',emoji:'🔒',detail:operationalStatusOnDay(key)?'Hay standby/reserva u otra actividad que condiciona el día.':'No aparece una ventana continua de 2 h para los dos.',best,totalHours};
+    }
+    cache.set(key,result); return result;
   }
   function mealWindowForDay(key,time,derived){
-    if(!state.people[0].duties.length || !state.people[1].duties.length || operationalStatusOnDay(key)) return null;
-    const center=utcForLocalDayTime(key,time),flex=minMs(state.rules.mealFlex),start=new Date(center.getTime()-flex),end=new Date(center.getTime()+flex);
-    const busyKinds=new Set(['duty','sleep','recovery','briefing']);
-    const blocks=mergeIntervals(derived.filter(e=>busyKinds.has(e.kind)).map(e=>overlap(e,{start,end},start,end)).filter(Boolean));
-    let cursor=start;
-    for(const b of blocks){
-      if(b.start-cursor>=minMs(60)) return {start:new Date(cursor),end:new Date(cursor.getTime()+minMs(60))};
-      if(b.end>cursor) cursor=b.end;
+    let cache=mealCache.get(derived); if(!cache){cache=new Map();mealCache.set(derived,cache);} const ck=`${key}|${time}`; if(cache.has(ck))return cache.get(ck);
+    let result=null;
+    if(state.people[0].duties.length && state.people[1].duties.length && !operationalStatusOnDay(key)){
+      const center=utcForLocalDayTime(key,time),flex=minMs(state.rules.mealFlex),start=new Date(center.getTime()-flex),end=new Date(center.getTime()+flex);
+      const busyKinds=new Set(['duty','sleep','recovery','briefing']);
+      const blocks=mergeIntervals(derived.filter(e=>busyKinds.has(e.kind)).map(e=>overlap(e,{start,end},start,end)).filter(Boolean));
+      let cursor=start;
+      for(const b of blocks){
+        if(b.start-cursor>=minMs(60)){result={start:new Date(cursor),end:new Date(cursor.getTime()+minMs(60))};break;}
+        if(b.end>cursor)cursor=b.end;
+      }
+      if(!result && end-cursor>=minMs(60))result={start:new Date(cursor),end:new Date(cursor.getTime()+minMs(60))};
     }
-    if(end-cursor>=minMs(60)) return {start:new Date(cursor),end:new Date(cursor.getTime()+minMs(60))};
-    return null;
+    cache.set(ck,result); return result;
   }
 
+
   eventsForDay=function(key,derived,includeQuiet=true){
+    let cache=eventsDayCache.get(derived); if(!cache){cache=new Map();eventsDayCache.set(derived,cache);} const ck=`${key}|${includeQuiet?'q':'nq'}`; if(cache.has(ck))return cache.get(ck);
     const out=[];
     state.people.forEach((p,pi)=>p.duties.filter(x=>x.kind==='status'&&x.date===key).forEach(x=>out.push({kind:'status',person:pi,label:x.status,raw:x,date:key})));
     derived.filter(e=>eventOverlapsDay(e,key)&&(includeQuiet||e.kind!=='quiet')).forEach(e=>out.push(e));
     const cw=coupleWindowForDay(key,derived); if(cw)out.push({kind:'couple',person:null,start:cw.start,end:cw.end,label:'Ventana juntos',date:key});
     const order={status:0,quiet:1,sleep:2,briefing:3,duty:4,recovery:5,couple:6};
     out.sort((a,b)=>{const ta=a.start?+new Date(a.start):-Infinity,tb=b.start?+new Date(b.start):-Infinity;return ta!==tb?ta-tb:(order[a.kind]??9)-(order[b.kind]??9);});
-    return out;
+    cache.set(ck,out); return out;
   };
+
 
   const baseEventClass=eventClass,baseEventBlockTitle=eventBlockTitle,baseEventBlockMeta=eventBlockMeta,baseEventTitle=eventTitle,baseEventSubtitle=eventSubtitle,baseEventKicker=eventKicker,baseEventDetailHtml=eventDetailHtml;
   eventClass=function(e){ return e.kind==='briefing'?'briefing':baseEventClass(e); };
@@ -236,10 +266,10 @@
   renderDayCalendar=function(derived){
     const key=state.focusDate,todayKey=dayKey(new Date());$('monthTitle').textContent=localDayLabel(key,{weekday:'long',day:'numeric',month:'long',year:'numeric'});$('calendar').className='calendar day-view split-people';
     if(state.calendarDensity==='simple'){
-      const s=dayPlanStatus(key,derived),dinner=mealWindowForDay(key,state.rules.dinnerTime,derived);
+      const s=dayPlanStatus(key,derived),lunch=mealWindowForDay(key,state.rules.lunchTime,derived),dinner=mealWindowForDay(key,state.rules.dinnerTime,derived);
       let html=`<div class="simple-day-card ${s.level} ${key===todayKey?'today':''}"><div class="simple-day-icon">${s.emoji}</div><h2>${esc(s.label)}</h2><p>${esc(s.detail)}</p>`;
       if(s.best)html+=`<div class="simple-day-window"><span>Mejor momento juntos</span><b>${timeLocal(s.best.start)}–${timeLocal(s.best.end)}</b></div>`;
-      html+=`<div class="simple-day-window"><span>Cena</span><b>${dinner?`Posible · ${timeLocal(dinner.start)}–${timeLocal(dinner.end)}`:'Difícil en el horario preferido'}</b></div><p class="simple-switch-note">Cambia a <b>Completo</b> para ver duties, briefings, sueño y recovery.</p></div>`;
+      html+=`<div class="simple-day-window"><span>Comida</span><b>${lunch?`Posible · ${timeLocal(lunch.start)}–${timeLocal(lunch.end)}`:'Difícil en el horario preferido'}</b></div><div class="simple-day-window"><span>Cena</span><b>${dinner?`Posible · ${timeLocal(dinner.start)}–${timeLocal(dinner.end)}`:'Difícil en el horario preferido'}</b></div><p class="simple-switch-note">Cambia a <b>Completo</b> para ver duties, briefings, sueño y recovery.</p></div>`;
       $('calendar').innerHTML=html;return;
     }
     const ev=eventsForDay(key,derived,true),allDay=ev.filter(e=>e.kind==='status'),rawSegments=ev.filter(e=>e.kind!=='status'&&e.start&&e.end).map(e=>timelineSegment(e,key)).filter(Boolean),segments=assignPersonTimelineLanes(rawSegments),H=64,dayHeight=24*H;
@@ -247,26 +277,31 @@
     if(allDay.length){const a0=allDay.filter(e=>e.person===0),a1=allDay.filter(e=>e.person===1),ash=allDay.filter(e=>e.person==null);html+='<div class="all-day-row split-all-day"><span class="all-day-label">Todo el día</span><div class="all-day-people">';for(const [pi,list] of [[0,a0],[1,a1]])html+=`<div class="all-day-person person-${pi}">${list.map(e=>renderEventButton(e,'all-day-event','day')).join('')||'<span class="empty-person-lane">—</span>'}</div>`;html+='</div></div>';if(ash.length)html+=`<div class="all-day-shared">${ash.map(e=>renderEventButton(e,'all-day-event shared-event','day')).join('')}</div>`;}
     if(!segments.length&&!allDay.length)html+='<div class="empty-agenda"><strong>Día despejado</strong><span>No hay eventos calculados para este día.</span></div>';
     else if(segments.length){html+=`<div class="timeline-scroll"><div class="timeline-canvas split-timeline" style="height:${dayHeight}px">`;for(let h=0;h<24;h++)html+=`<div class="timeline-hour-label" style="top:${h*H-8}px">${String(h).padStart(2,'0')}:00</div><div class="timeline-hour-line" style="top:${h*H}px"></div>`;html+='<div class="timeline-person-divider" aria-hidden="true"></div>';if(key===todayKey){const nowMin=localMinuteOfDay(new Date());html+=`<div class="timeline-now" style="top:${nowMin/60*H}px"><span></span></div>`;}for(const seg of segments){const e=seg.e,id=registerEvent(e),top=seg.startMin/60*H,height=Math.max((seg.endMin-seg.startMin)/60*H,30);let leftPct,widthPct;if(e.person==null){leftPct=0;widthPct=100;}else{const sideBase=e.person===0?0:50,subWidth=50/seg.laneCount;leftPct=sideBase+seg.lane*subWidth;widthPct=subWidth;}const compact=height<48?' compact':'';html+=`<button type="button" class="timeline-event ${eventClass(e)} ${personLaneClass(e)}${compact}" data-event-id="${id}" style="top:${top}px;height:${height}px;left:calc(${leftPct}% + 5px);width:calc(${widthPct}% - 9px)" aria-label="Ver detalle de ${esc(eventText(e))}"><span class="timeline-event-title">${esc(eventBlockTitle(e))}</span><span class="timeline-event-meta">${esc(segmentBlockMeta(seg))}</span>${height>=72?`<span class="timeline-event-sub">${esc(eventSubtitle(e))}</span>`:''}</button>`;}html+='</div></div>';}
-    html+='</div>';$('calendar').innerHTML=html;const scroll=$('calendar').querySelector('.timeline-scroll');if(scroll&&segments.length){const first=Math.min(...segments.map(s=>s.startMin));requestAnimationFrame(()=>scroll.scrollTop=Math.max(0,(first/60)*H-H));}
+    html+='</div>';$('calendar').innerHTML=html;const scroll=$('calendar').querySelector('.timeline-scroll'),renderVersion=window.__rhRenderVersion;if(scroll&&segments.length){const first=Math.min(...segments.map(s=>s.startMin));requestAnimationFrame(()=>{if(scroll.isConnected&&window.__rhRenderVersion===renderVersion&&state.calendarMode==='day')scroll.scrollTop=Math.max(0,(first/60)*H-H);});}
   };
 
   function summaryModel(){
-    const [y,m]=state.month.split('-').map(Number),days=new Date(y,m,0).getDate(),derived=allDerived(),dayRows=[];
+    const derived=allDerived();
+    const sig=`${state.month}|${derivedStateSignature()}|${state.rules.lunchTime}|${state.rules.dinnerTime}|${state.rules.mealFlex}`;
+    if(summaryCacheValue && summaryCacheSignature===sig)return summaryCacheValue;
+    const [y,m]=state.month.split('-').map(Number),days=new Date(y,m,0).getDate(),dayRows=[];
     for(let d=1;d<=days;d++){
-      const key=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`,status=dayPlanStatus(key,derived),dinner=mealWindowForDay(key,state.rules.dinnerTime,derived);
+      const key=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const status=dayPlanStatus(key,derived),lunch=mealWindowForDay(key,state.rules.lunchTime,derived),dinner=mealWindowForDay(key,state.rules.dinnerTime,derived);
       const has0=derived.some(e=>e.kind==='duty'&&e.person===0&&eventOverlapsDay(e,key)),has1=derived.some(e=>e.kind==='duty'&&e.person===1&&eventOverlapsDay(e,key));
-      dayRows.push({key,status,dinner,bothWork:has0&&has1});
+      dayRows.push({key,status,lunch,dinner,bothWork:has0&&has1});
     }
-    const togetherDays=dayRows.filter(x=>x.status.level==='together'),partialDays=dayRows.filter(x=>x.status.level==='partial'),busyDays=dayRows.filter(x=>x.status.level==='busy'),dinnerDays=dayRows.filter(x=>x.dinner),bothWorkDays=dayRows.filter(x=>x.bothWork),togetherHours=dayRows.reduce((s,x)=>s+x.status.totalHours,0);
+    const togetherDays=dayRows.filter(x=>x.status.level==='together'),partialDays=dayRows.filter(x=>x.status.level==='partial'),busyDays=dayRows.filter(x=>x.status.level==='busy'),lunchDays=dayRows.filter(x=>x.lunch),dinnerDays=dayRows.filter(x=>x.dinner),bothWorkDays=dayRows.filter(x=>x.bothWork),togetherHours=dayRows.reduce((sum,x)=>sum+x.status.totalHours,0);
     const metrics=[
       {id:'togetherDays',label:'❤️ Días para pasar juntos',value:togetherDays.length,items:togetherDays.map(x=>({key:x.key,text:x.status.detail}))},
       {id:'partialDays',label:'🫶 Coincidimos un rato',value:partialDays.length,items:partialDays.map(x=>({key:x.key,text:x.status.detail}))},
       {id:'busyDays',label:'🔒 Días ocupados',value:busyDays.length,items:busyDays.map(x=>({key:x.key,text:x.status.detail}))},
       {id:'togetherHours',label:'🕒 Horas potenciales juntos',value:`${Math.round(togetherHours)} h`,items:dayRows.filter(x=>x.status.totalHours>0).sort((a,b)=>b.status.totalHours-a.status.totalHours).map(x=>({key:x.key,text:`${x.status.totalHours.toFixed(1)} h potenciales entre 08:00 y 23:00`}))},
-      {id:'dinnerDays',label:'🍽️ Cenas compatibles',value:dinnerDays.length,items:dinnerDays.map(x=>({key:x.key,text:`Ventana sugerida ${timeLocal(x.dinner.start)}–${timeLocal(x.dinner.end)}`}))},
+      {id:'lunchDays',label:'🥗 Comidas compatibles',value:lunchDays.length,items:lunchDays.map(x=>({key:x.key,text:`Comida posible ${timeLocal(x.lunch.start)}–${timeLocal(x.lunch.end)}`}))},
+      {id:'dinnerDays',label:'🍽️ Cenas compatibles',value:dinnerDays.length,items:dinnerDays.map(x=>({key:x.key,text:`Cena posible ${timeLocal(x.dinner.start)}–${timeLocal(x.dinner.end)}`}))},
       {id:'bothWorkDays',label:'✈️ Días trabajando los dos',value:bothWorkDays.length,items:bothWorkDays.map(x=>({key:x.key,text:'Ambos tienen duty en algún momento del día.'}))}
     ];
-    return {derived,dayRows,metrics};
+    summaryCacheSignature=sig; summaryCacheValue={derived,dayRows,metrics}; return summaryCacheValue;
   }
   function renderSummaryDetail(model){
     const metric=model.metrics.find(x=>x.id===selectedSummaryMetric)||model.metrics[0];selectedSummaryMetric=metric.id;
@@ -314,7 +349,7 @@
     catch(err){alert('Zona horaria no válida. Usa, por ejemplo, Europe/Athens o Europe/Madrid.');}
   },true);
   $('exportIcs')?.addEventListener('click',e=>{e.stopImmediatePropagation();exportEnhancedIcs();},true);
-  $('stats')?.addEventListener('click',e=>{const b=e.target.closest('[data-summary-metric]');if(!b)return;selectedSummaryMetric=b.dataset.summaryMetric;renderSummary();});
+  $('stats')?.addEventListener('click',e=>{const b=e.target.closest('[data-summary-metric]');if(!b)return;selectedSummaryMetric=b.dataset.summaryMetric;renderSummaryDetail(summaryModel());});
   ['summaryDrilldown','bestWindows','coordination'].forEach(id=>$(id)?.addEventListener('click',e=>{const b=e.target.closest('[data-summary-day]');if(!b)return;openDay(b.dataset.summaryDay);document.querySelector('.tab[data-view="calendarView"]')?.click();}));
 
   function syncPersonalRuleNames(){

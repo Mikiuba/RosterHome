@@ -29,7 +29,7 @@ body.modal-open{overflow:hidden}.modal{position:fixed;inset:0;z-index:1000;displ
 @media(max-width:560px){.calendar-head{align-items:center}.calendar-nav-actions{gap:3px}.today-btn{font-size:11px;padding:8px 9px}.calendar-view-switch{max-width:none}.view-mode{padding:7px 6px;font-size:12px}.week-grid{grid-template-columns:1fr}.week-day{min-height:0}.week-day-head{flex-direction:row;justify-content:space-between;align-items:center}.week-events{padding:6px 7px}.week-event{font-size:11px;padding:7px 8px}.agenda-item{grid-template-columns:74px minmax(0,1fr) 16px;gap:9px;padding:12px 9px}.agenda-time{font-size:11px}.agenda-main b{font-size:12px}.agenda-main small{font-size:10px}.modal{align-items:end;padding:0}.modal-card{width:100%;max-height:88vh;border-radius:20px 20px 0 0;border-bottom:0;padding:16px 14px calc(18px + env(safe-area-inset-bottom))}.detail-row{gap:12px}.sector{grid-template-columns:72px minmax(0,1fr)}.sector small{grid-column:2}}
 
 /* =========================================================
-   RosterHome v0.2.1 · Apple Calendar-inspired calendar surface
+   RosterHome v0.3 · Apple Calendar-inspired calendar surface
    ========================================================= */
 :root{
   --p1-solid:#3478f6;
@@ -160,7 +160,7 @@ button.event.calendar-block:hover,button.event.calendar-block:focus-visible{filt
 .ftl-card{max-width:980px;margin:0 auto}.ftl-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px}.ftl-kicker{text-transform:uppercase;letter-spacing:.1em;font-size:10px;font-weight:800;color:var(--accent)}.ftl-head h2{font-size:26px;margin:3px 0 4px}.ftl-head p{margin:0;max-width:620px;line-height:1.45}.ftl-status{white-space:nowrap;padding:7px 10px;border-radius:999px;background:rgba(255,213,122,.08);border:1px solid rgba(255,213,122,.25);color:#ffe09a;font-size:11px;font-weight:750}.ftl-warning{margin-bottom:14px}.ftl-overview{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-bottom:18px}.ftl-metric{padding:12px;background:#101827;border:1px solid var(--line);border-radius:12px}.ftl-metric span{display:block;color:var(--muted);font-size:10.5px}.ftl-metric b{display:block;margin-top:5px;font-size:18px}.ftl-metric.pending b{color:var(--warn)}.ftl-section{margin-top:16px}.ftl-section h3{font-size:14px;margin:0 0 9px}.ftl-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.ftl-grid article{padding:12px;background:#101827;border:1px solid var(--line);border-radius:12px}.ftl-grid b{display:block;font-size:11.5px;margin-bottom:4px}.ftl-grid span{display:block;color:var(--muted);font-size:10.5px;line-height:1.4}.ftl-result-preview{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.ftl-result-preview>div{padding:12px;border:1px dashed #46516a;border-radius:12px;background:rgba(255,255,255,.015)}.ftl-result-preview span,.ftl-result-preview small{display:block;color:var(--muted);font-size:10.5px}.ftl-result-preview b{display:block;font-size:20px;margin:5px 0}
 @media(max-width:700px){.legend-grid,.term-grid{grid-template-columns:1fr}.ftl-head{flex-direction:column}.ftl-status{white-space:normal}.ftl-overview{grid-template-columns:1fr 1fr}.ftl-grid{grid-template-columns:1fr}.ftl-result-preview{grid-template-columns:1fr}.term-grid>div{grid-template-columns:58px minmax(0,1fr)}}
 
-/* Clarity pass — v0.2.1 presentation revision */
+/* Clarity pass — v0.3 presentation revision */
 .calendar-clarity-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0 10px}
 .calendar-density-switch{display:inline-grid;grid-template-columns:1fr 1fr;gap:3px;padding:3px;background:#0e1528;border:1px solid var(--line);border-radius:10px}
 .density-mode{border:0;background:transparent;color:var(--muted);padding:6px 10px;border-radius:8px;font-size:11px;font-weight:760}
@@ -198,11 +198,11 @@ button.event.calendar-block:hover,button.event.calendar-block:focus-visible{filt
 .import-audit{margin-top:10px}.import-audit:empty{display:none}.import-audit{padding:11px 12px;border:1px solid var(--line);border-radius:12px;background:#0f1728;font-size:11px;line-height:1.4}.import-audit.ok{border-color:rgba(123,224,179,.28);background:rgba(123,224,179,.045)}.import-audit.bad{border-color:rgba(255,139,158,.32);background:rgba(255,139,158,.05)}.audit-title{font-weight:800;font-size:12px;margin-bottom:8px}.import-audit.ok .audit-title{color:var(--good)}.import-audit.bad .audit-title{color:var(--bad)}.audit-chips{display:flex;flex-wrap:wrap;gap:6px}.audit-chips span{padding:5px 7px;border:1px solid var(--line);border-radius:999px;color:#cbd5eb;background:rgba(255,255,255,.025)}.audit-errors,.audit-warnings{margin-top:9px;color:#d9e1f4}.audit-errors ul,.audit-warnings ul{margin:6px 0 0;padding-left:18px}.audit-errors{color:#ffd0d7}.audit-warnings summary{cursor:pointer;color:#ffe2a1}.import-safety p{line-height:1.5;margin:4px 0 12px}
 @media(max-width:700px){.audit-chips{display:grid;grid-template-columns:1fr 1fr}.audit-chips span{border-radius:9px}.import-audit{font-size:10.5px}}
 
-/* v0.2.1 timeline placement fix */
+/* v0.3 timeline placement fix */
 .timeline-event.sleep.conflict{background:repeating-linear-gradient(135deg,#a33b46 0,#a33b46 10px,#7e2934 10px,#7e2934 20px);outline:2px solid #ff8d98;outline-offset:-2px}
 
 /* =========================================================
-   RosterHome v0.2.1 · fixed left/right person lanes
+   RosterHome v0.3 · fixed left/right person lanes
    Perfil 1 (Miguel by default) = left · Perfil 2 (Nicole) = right
    ========================================================= */
 .split-people .owner-p0{--owner-accent:var(--p1-solid)}
@@ -262,7 +262,7 @@ button.event.calendar-block:hover,button.event.calendar-block:focus-visible{filt
 }
 
 /* =========================================================
-   RosterHome v0.2.1 · lifestyle planning / summary build
+   RosterHome v0.3 · lifestyle planning / summary build
    ========================================================= */
 :root{--briefing-solid:#2f9b8f;--simple-good:#234c3d;--simple-partial:#433a24;--simple-busy:#3b2630}
 button.event.calendar-block.briefing,.timeline-event.briefing{background:var(--briefing-solid)}
@@ -301,4 +301,18 @@ button.event.calendar-block.briefing,.timeline-event.briefing{background:var(--b
   .simple-day-card{padding:24px 16px}.simple-day-card h2{font-size:22px}.simple-day-window{gap:8px}.simple-day-window b{font-size:12px}
   .summary-stats{grid-template-columns:1fr 1fr}.stat-button{padding:11px}.stat-button b{font-size:19px}.workload-compare{grid-template-columns:1fr}
   .summary-drill-row{grid-template-columns:72px minmax(0,1fr) 14px}
+}
+
+/* =========================================================
+   RosterHome v0.3 · fast view switching / layout stability
+   ========================================================= */
+#calendar{min-width:0;overflow:hidden;overflow-anchor:none;contain:layout paint}
+.calendar.week-view,.calendar.day-view{grid-template-columns:none}
+.calendar.view-switching{pointer-events:none}
+.calendar-view-switch,.calendar-density-switch{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.view-mode,.density-mode{touch-action:manipulation}
+.timeline-scroll{overflow-anchor:none}
+.summary-stats .stat-button{min-height:104px}
+@media(max-width:560px){
+  .summary-stats .stat-button{min-height:96px}
 }

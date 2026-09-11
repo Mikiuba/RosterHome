@@ -17,6 +17,7 @@ const DEFAULT_STATE = {
 let state = loadState();
 let renderedEvents = new Map();
 let eventCounter = 0;
+let calendarRenderFrame = 0;
 const STATE_SCHEMA_VERSION = 5;
 
 function dutyIdentity(d){
@@ -73,18 +74,23 @@ function minMs(m){ return m*60000; }
 
 if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
+const formatterCache=new Map();
+function cachedFormatter(locale,opts){
+  const key=locale+'|'+JSON.stringify(opts);
+  let f=formatterCache.get(key); if(!f){f=new Intl.DateTimeFormat(locale,opts);formatterCache.set(key,f);} return f;
+}
 function fmt(date, opts={}){
-  return new Intl.DateTimeFormat('es-ES',{timeZone:state.rules.homeTz,...opts}).format(new Date(date));
+  return cachedFormatter('es-ES',{timeZone:state.rules.homeTz,...opts}).format(new Date(date));
 }
 function dayKey(date){
-  const p = new Intl.DateTimeFormat('en-CA',{timeZone:state.rules.homeTz,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(date));
+  const p=cachedFormatter('en-CA',{timeZone:state.rules.homeTz,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(date));
   const o=Object.fromEntries(p.map(x=>[x.type,x.value])); return `${o.year}-${o.month}-${o.day}`;
 }
-function hourLocal(date){ return Number(new Intl.DateTimeFormat('en-GB',{timeZone:state.rules.homeTz,hour:'2-digit',hour12:false}).format(new Date(date))); }
+function hourLocal(date){ return Number(cachedFormatter('en-GB',{timeZone:state.rules.homeTz,hour:'2-digit',hour12:false}).format(new Date(date))); }
 function timeLocal(date){ return fmt(date,{hour:'2-digit',minute:'2-digit',hour12:false}); }
-function monthLabel(ym){ const [y,m]=ym.split('-').map(Number); return new Intl.DateTimeFormat('es-ES',{month:'long',year:'numeric'}).format(new Date(y,m-1,1)); }
+function monthLabel(ym){ const [y,m]=ym.split('-').map(Number); return cachedFormatter('es-ES',{month:'long',year:'numeric'}).format(new Date(y,m-1,1)); }
 function localDateTime(date){ return fmt(date,{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hour12:false}); }
-function utcDateTime(date){ return new Intl.DateTimeFormat('es-ES',{timeZone:'UTC',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(date))+' UTC'; }
+function utcDateTime(date){ return cachedFormatter('es-ES',{timeZone:'UTC',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(date))+' UTC'; }
 function hhmmDisplay(v){ const s=String(v||'').replace(/\D/g,'').slice(0,4).padStart(4,'0'); return `${s.slice(0,2)}:${s.slice(2,4)}`; }
 function sourceDateDisplay(key){ if(!key)return '—'; const [y,m,d]=String(key).split('-'); return `${d}/${m}/${y}`; }
 function sourceRosterTime(d,which){
@@ -98,7 +104,7 @@ function sourceRosterTime(d,which){
 }
 
 function tzOffsetMillis(date, timeZone){
-  const parts = new Intl.DateTimeFormat('en-US',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(date);
+  const parts = cachedFormatter('en-US',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(date);
   const o=Object.fromEntries(parts.map(p=>[p.type,p.value]));
   const asUTC=Date.UTC(+o.year,+o.month-1,+o.day,+o.hour,+o.minute,+o.second); return asUTC-date.getTime();
 }
@@ -235,6 +241,9 @@ function eventClass(e){
   if(e.kind==='couple') return 'couple';
   return '';
 }
+function personLaneClass(e){
+  return e.person===0?'owner-p0':e.person===1?'owner-p1':'owner-shared';
+}
 function eventTimeRange(e){
   if(e.kind==='status') return 'Todo el día';
   if(e.start&&e.end) return `${timeLocal(e.start)}–${timeLocal(e.end)}`;
@@ -277,7 +286,7 @@ function eventText(e){
 }
 function renderEventButton(e,extraClass='',context='month'){
   const id=registerEvent(e);
-  return `<button type="button" class="event calendar-block ${eventClass(e)} ${extraClass}" data-event-id="${id}" aria-label="Ver detalle de ${esc(eventText(e))}"><span class="event-block-title">${esc(eventBlockTitle(e,context==='month'))}</span><span class="event-block-meta">${esc(eventBlockMeta(e))}</span></button>`;
+  return `<button type="button" class="event calendar-block ${eventClass(e)} ${personLaneClass(e)} ${extraClass}" data-event-id="${id}" aria-label="Ver detalle de ${esc(eventText(e))}"><span class="event-block-title">${esc(eventBlockTitle(e,context==='month'))}</span><span class="event-block-meta">${esc(eventBlockMeta(e))}</span></button>`;
 }
 
 function syncCalendarModeButtons(){
@@ -303,6 +312,7 @@ function simpleDayInsight(key,derived){
   return bits.length?`<div class="simple-insights">${bits.join('')}</div>`:'';
 }
 function renderCalendar(){
+  window.__rhRenderVersion=(window.__rhRenderVersion||0)+1;
   renderedEvents=new Map(); eventCounter=0;
   if($('legendP1')) $('legendP1').textContent=state.people[0].name||'Perfil 1'; if($('legendP2')) $('legendP2').textContent=state.people[1].name||'Perfil 2';
   if($('legendGuideP1')) $('legendGuideP1').textContent=state.people[0].name||'Perfil 1';
@@ -313,23 +323,42 @@ function renderCalendar(){
   if(state.calendarMode==='week') renderWeekCalendar(derived);
   else if(state.calendarMode==='day') renderDayCalendar(derived);
   else renderMonthCalendar(derived);
-  renderSummary();
+  const cal=$('calendar'); if(cal) cal.classList.remove('view-switching');
+}
+
+function queueCalendarRender(){
+  syncCalendarModeButtons();
+  syncCalendarDensityButtons();
+  const cal=$('calendar'); if(cal) cal.classList.add('view-switching');
+  if(calendarRenderFrame) cancelAnimationFrame(calendarRenderFrame);
+  calendarRenderFrame=requestAnimationFrame(()=>{
+    calendarRenderFrame=0;
+    renderCalendar();
+  });
 }
 
 function renderMonthCalendar(derived){
   const [year,month]=state.month.split('-').map(Number); const first=new Date(year,month-1,1); const days=new Date(year,month,0).getDate(); const lead=(first.getDay()+6)%7;
   $('monthTitle').textContent=monthLabel(state.month);
-  $('calendar').className='calendar month-view';
+  $('calendar').className='calendar month-view split-people';
   const names=['L','M','X','J','V','S','D']; let html=names.map(x=>`<div class="dow">${x}</div>`).join('');
   for(let i=0;i<lead;i++) html+='<div class="day other"></div>';
   const todayKey=dayKey(new Date());
   for(let d=1;d<=days;d++){
     const key=`${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const ev=calendarVisibleEvents(eventsForDay(key,derived,false),'month');
+    const p0=ev.filter(e=>e.person===0), p1=ev.filter(e=>e.person===1), shared=ev.filter(e=>e.person==null);
     html+=`<div class="day ${key===todayKey?'today':''}"><button type="button" class="daynum daynum-btn" data-open-day="${key}" aria-label="Abrir ${esc(localDayLabel(key))}">${d}</button>`;
-    const max=6;
-    ev.slice(0,max).forEach(e=>{ html+=renderEventButton(e); });
-    if(ev.length>max) html+=`<button type="button" class="more-events" data-open-day="${key}">+${ev.length-max} más</button>`;
+    html+='<div class="month-person-lanes">';
+    for(const [pi,list] of [[0,p0],[1,p1]]){
+      const max=4;
+      html+=`<div class="month-person-lane person-${pi}" aria-label="${esc(state.people[pi].name)}">`;
+      list.slice(0,max).forEach(e=>{ html+=renderEventButton(e,'month-person-event','month'); });
+      if(list.length>max) html+=`<button type="button" class="more-events lane-more" data-open-day="${key}">+${list.length-max}</button>`;
+      html+='</div>';
+    }
+    html+='</div>';
+    if(shared.length) html+=`<div class="shared-events">${shared.map(e=>renderEventButton(e,'shared-event','month')).join('')}</div>`;
     html+=simpleDayInsight(key,derived);
     html+='</div>';
   }
@@ -339,15 +368,24 @@ function renderMonthCalendar(derived){
 function renderWeekCalendar(derived){
   const start=mondayKey(state.focusDate), todayKey=dayKey(new Date());
   $('monthTitle').textContent=shortWeekTitle(start);
-  $('calendar').className='calendar week-view';
+  $('calendar').className='calendar week-view split-people';
   let html='<div class="week-grid">';
   for(let i=0;i<7;i++){
     const key=addDaysKey(start,i); const ev=calendarVisibleEvents(eventsForDay(key,derived,true),'week');
+    const p0=ev.filter(e=>e.person===0), p1=ev.filter(e=>e.person===1), shared=ev.filter(e=>e.person==null);
     const weekday=localDayLabel(key,{weekday:'short'}); const date=localDayLabel(key,{day:'numeric',month:'short'});
-    html+=`<section class="week-day ${key===todayKey?'today':''}"><button type="button" class="week-day-head" data-open-day="${key}"><span>${esc(weekday)}</span><b>${esc(date)}</b></button><div class="week-events">`;
-    html+=ev.length?ev.map(e=>renderEventButton(e,'week-event','week')).join(''):'<div class="empty-day">Sin eventos</div>';
+    html+=`<section class="week-day ${key===todayKey?'today':''}"><button type="button" class="week-day-head" data-open-day="${key}"><span>${esc(weekday)}</span><b>${esc(date)}</b></button>`;
+    html+=`<div class="week-person-head"><span>${esc(state.people[0].name)}</span><span>${esc(state.people[1].name)}</span></div>`;
+    html+='<div class="week-events person-split">';
+    for(const [pi,list] of [[0,p0],[1,p1]]){
+      html+=`<div class="week-person-lane person-${pi}">`;
+      html+=list.length?list.map(e=>renderEventButton(e,'week-event','week')).join(''):'<div class="empty-person-lane">—</div>';
+      html+='</div>';
+    }
+    html+='</div>';
+    if(shared.length) html+=`<div class="week-shared">${shared.map(e=>renderEventButton(e,'week-event shared-event','week')).join('')}</div>`;
     html+=simpleDayInsight(key,derived);
-    html+='</div></section>';
+    html+='</section>';
   }
   html+='</div>';
   $('calendar').innerHTML=html;
@@ -413,39 +451,67 @@ function assignTimelineLanes(segments){
   xs.forEach(s=>s.laneCount=groups.get(s.groupId)||1);
   return xs;
 }
+function assignPersonTimelineLanes(segments){
+  const result=[];
+  for(const pi of [0,1]){
+    const own=segments.filter(s=>s.e.person===pi);
+    assignTimelineLanes(own);
+    result.push(...own);
+  }
+  const shared=segments.filter(s=>s.e.person==null);
+  assignTimelineLanes(shared);
+  result.push(...shared);
+  return result.sort((a,b)=>a.startMin-b.startMin||a.endMin-b.endMin);
+}
+
 function renderDayCalendar(derived){
   const key=state.focusDate; const ev=calendarVisibleEvents(eventsForDay(key,derived,true),'day'); const todayKey=dayKey(new Date());
   $('monthTitle').textContent=localDayLabel(key,{weekday:'long',day:'numeric',month:'long',year:'numeric'});
-  $('calendar').className='calendar day-view';
+  $('calendar').className='calendar day-view split-people';
   const allDay=ev.filter(e=>e.kind==='status');
-  const segments=assignTimelineLanes(ev.filter(e=>e.kind!=='status'&&e.start&&e.end).map(e=>timelineSegment(e,key)).filter(Boolean));
+  const rawSegments=ev.filter(e=>e.kind!=='status'&&e.start&&e.end).map(e=>timelineSegment(e,key)).filter(Boolean);
+  const segments=assignPersonTimelineLanes(rawSegments);
   const H=64, dayHeight=24*H;
   let html=`<div class="day-agenda ${key===todayKey?'today':''}"><div class="day-agenda-head"><span>${ev.length} ${ev.length===1?'evento':'eventos'}</span><b>${esc(state.rules.homeTz)}</b></div>`;
   if(state.calendarDensity==='simple'){
     const cw=coupleWindowForDay(key,derived);
     if(cw) html+=`<div class="day-opportunity"><span>❤️ Mejor ventana juntos</span><b>${timeLocal(cw.start)}–${timeLocal(cw.end)}</b></div>`;
   }
+  html+=`<div class="day-person-head"><span>${esc(state.people[0].name)}</span><span>${esc(state.people[1].name)}</span></div>`;
   if(allDay.length){
-    html+='<div class="all-day-row"><span class="all-day-label">Todo el día</span><div class="all-day-events">';
-    html+=allDay.map(e=>renderEventButton(e,'all-day-event','day')).join('');
+    const a0=allDay.filter(e=>e.person===0), a1=allDay.filter(e=>e.person===1), ash=allDay.filter(e=>e.person==null);
+    html+='<div class="all-day-row split-all-day"><span class="all-day-label">Todo el día</span><div class="all-day-people">';
+    for(const [pi,list] of [[0,a0],[1,a1]]){
+      html+=`<div class="all-day-person person-${pi}">${list.map(e=>renderEventButton(e,'all-day-event','day')).join('')||'<span class="empty-person-lane">—</span>'}</div>`;
+    }
     html+='</div></div>';
+    if(ash.length) html+=`<div class="all-day-shared">${ash.map(e=>renderEventButton(e,'all-day-event shared-event','day')).join('')}</div>`;
   }
   if(!segments.length && !allDay.length){
     html+='<div class="empty-agenda"><strong>Día despejado</strong><span>No hay duties, sueño, recovery ni ventanas calculadas para este día.</span></div>';
   }else if(segments.length){
-    html+=`<div class="timeline-scroll"><div class="timeline-canvas" style="height:${dayHeight}px">`;
+    html+=`<div class="timeline-scroll"><div class="timeline-canvas split-timeline" style="height:${dayHeight}px">`;
     for(let h=0;h<24;h++){
       html+=`<div class="timeline-hour-label" style="top:${h*H-8}px">${String(h).padStart(2,'0')}:00</div><div class="timeline-hour-line" style="top:${h*H}px"></div>`;
     }
+    html+='<div class="timeline-person-divider" aria-hidden="true"></div>';
     if(key===todayKey){
       const nowMin=localMinuteOfDay(new Date());
       html+=`<div class="timeline-now" style="top:${nowMin/60*H}px"><span></span></div>`;
     }
     for(const seg of segments){
       const e=seg.e, id=registerEvent(e), top=seg.startMin/60*H, rawHeight=(seg.endMin-seg.startMin)/60*H, height=Math.max(rawHeight,30);
-      const width=100/seg.laneCount, left=seg.lane*width;
+      let leftPct,widthPct;
+      if(e.person==null){
+        leftPct=0; widthPct=100;
+      }else{
+        const sideBase=e.person===0?0:50;
+        const subWidth=50/seg.laneCount;
+        leftPct=sideBase+seg.lane*subWidth;
+        widthPct=subWidth;
+      }
       const compact=height<48?' compact':'';
-      html+=`<button type="button" class="timeline-event ${eventClass(e)}${compact}" data-event-id="${id}" style="top:${top}px;height:${height}px;left:calc(${left}% + 6px);width:calc(${width}% - 10px)" aria-label="Ver detalle de ${esc(eventText(e))}"><span class="timeline-event-title">${esc(eventBlockTitle(e))}</span><span class="timeline-event-meta">${esc(segmentBlockMeta(seg))}</span>${height>=72?`<span class="timeline-event-sub">${esc(eventSubtitle(e))}</span>`:''}</button>`;
+      html+=`<button type="button" class="timeline-event ${eventClass(e)} ${personLaneClass(e)}${compact}" data-event-id="${id}" style="top:${top}px;height:${height}px;left:calc(${leftPct}% + 5px);width:calc(${widthPct}% - 9px)" aria-label="Ver detalle de ${esc(eventText(e))}"><span class="timeline-event-title">${esc(eventBlockTitle(e))}</span><span class="timeline-event-meta">${esc(segmentBlockMeta(seg))}</span>${height>=72?`<span class="timeline-event-sub">${esc(eventSubtitle(e))}</span>`:''}</button>`;
     }
     html+='</div></div>';
   }
@@ -688,14 +754,14 @@ function shiftPeriod(delta){
   saveState(); renderCalendar();
 }
 function setCalendarMode(mode){
-  if(!['month','week','day'].includes(mode))return;
+  if(!['month','week','day'].includes(mode) || state.calendarMode===mode)return;
   if(state.calendarMode==='month' && mode!=='month'){
     const today=dayKey(new Date()); state.focusDate=today.startsWith(state.month)?today:`${state.month}-01`;
   }
-  state.calendarMode=mode; state.month=state.focusDate.slice(0,7); saveState(); renderCalendar();
+  state.calendarMode=mode; state.month=state.focusDate.slice(0,7); saveState(); queueCalendarRender();
 }
-function goToday(){ state.focusDate=dayKey(new Date()); state.month=state.focusDate.slice(0,7); saveState(); renderCalendar(); }
-function openDay(key){ state.focusDate=key; state.month=key.slice(0,7); state.calendarMode='day'; saveState(); renderCalendar(); }
+function goToday(){ state.focusDate=dayKey(new Date()); state.month=state.focusDate.slice(0,7); saveState(); queueCalendarRender(); }
+function openDay(key){ state.focusDate=key; state.month=key.slice(0,7); state.calendarMode='day'; saveState(); queueCalendarRender(); }
 
 function icsStamp(d){return new Date(d).toISOString().replace(/[-:]/g,'').replace(/\.\d{3}/,'');}
 function icsEscape(s){return String(s).replace(/\\/g,'\\\\').replace(/\n/g,'\\n').replace(/,/g,'\\,').replace(/;/g,'\\;');}
@@ -708,9 +774,9 @@ function exportIcs(){
 }
 
 // UI wiring
-document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$(b.dataset.view).classList.add('active'); if(b.dataset.view==='summaryView')renderSummary(); if(b.dataset.view==='ftlView')renderFtl();}));
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$(b.dataset.view).classList.add('active'); if(b.dataset.view==='summaryView')requestAnimationFrame(()=>renderSummary()); if(b.dataset.view==='ftlView')requestAnimationFrame(()=>renderFtl());}));
 document.querySelectorAll('[data-calendar-mode]').forEach(b=>b.addEventListener('click',()=>setCalendarMode(b.dataset.calendarMode)));
-document.querySelectorAll('[data-calendar-density]').forEach(b=>b.addEventListener('click',()=>{ state.calendarDensity=b.dataset.calendarDensity; saveState(); renderCalendar(); }));
+document.querySelectorAll('[data-calendar-density]').forEach(b=>b.addEventListener('click',()=>{ if(state.calendarDensity===b.dataset.calendarDensity)return; state.calendarDensity=b.dataset.calendarDensity; saveState(); queueCalendarRender(); }));
 [0,1].forEach(i=>{$(`file${i}`).addEventListener('change',e=>e.target.files[0]&&handleFile(i,e.target.files[0]));$(`name${i}`).addEventListener('change',e=>{state.people[i].name=e.target.value.trim()||`Perfil ${i+1}`;saveState();renderCalendar();});});
 document.querySelectorAll('[data-clear]').forEach(b=>b.addEventListener('click',()=>{const i=Number(b.dataset.clear);state.people[i].duties=[];state.people[i].source=null;saveState();$(`status${i}`).textContent='Roster borrado.';if($(`audit${i}`))$(`audit${i}`).innerHTML='';renderCalendar();}));
 $('importText').addEventListener('click',()=>{try{const i=Number($('pastePerson').value),parsed=RosterParser.parseCrewLinkText($('pasteText').value);renderImportAudit(i,parsed);validateBeforeMerge(parsed);const n=mergeParsed(i,parsed,'texto pegado');$('pasteText').value='';alert(`${n} duties importados y validados.`);}catch(e){alert(e.message);}});
@@ -720,5 +786,5 @@ $('calendar').addEventListener('click',e=>{const eventBtn=e.target.closest('[dat
 document.querySelectorAll('[data-close-modal]').forEach(x=>x.addEventListener('click',closeEventDetails));
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('eventModal').classList.contains('hidden'))closeEventDetails();});
 
-syncInputs(); renderCalendar();
+syncInputs();
 if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
