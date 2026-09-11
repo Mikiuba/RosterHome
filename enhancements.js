@@ -1,4 +1,4 @@
-/* RosterHome v0.3.1 · briefing from first-flight departure + recovery overlay */
+/* RosterHome v0.3.2 · briefing/recovery + durable local persistence */
 (function(){
   // New per-person planning defaults. Existing users keep their saved values.
   if(state.rules.briefingLead0 == null) state.rules.briefingLead0=105;
@@ -403,4 +403,54 @@
   syncInputs();
   syncPersonalRuleNames();
   renderCalendar();
+
+  // v0.3.2 — durable roster persistence and user-controlled backups.
+  function storageDateLabel(value){
+    if(!value)return 'Todavía no';
+    try{return new Intl.DateTimeFormat('es-ES',{dateStyle:'short',timeStyle:'short'}).format(new Date(value));}
+    catch(_){return value;}
+  }
+  async function refreshStorageStatus(){
+    if(!$('storageBadge'))return;
+    let st={indexedDB:false,persisted:false};
+    try{st=await window.RosterStorage?.status()||st;}catch(_){ }
+    const hasRoster=state.people.some(p=>(p.duties||[]).length>0);
+    $('storageSaved').textContent=hasRoster?'Sí · IndexedDB + copia local':'Sin roster importado';
+    $('storagePersisted').textContent=st.persisted?'Concedida ✅':(st.indexedDB?'IndexedDB activa · no garantizada':'No disponible');
+    $('storageLastSaved').textContent=storageDateLabel(state.lastSavedAt);
+    $('storageBadge').className=`storage-badge ${st.persisted?'ok':(st.indexedDB?'warn':'bad')}`;
+    $('storageBadge').textContent=st.persisted?'Persistente':(st.indexedDB?'Guardado local':'Solo memoria local');
+    if($('storageHelp')) $('storageHelp').textContent=st.persisted
+      ?'iOS/Safari ha concedido almacenamiento persistente a RosterHome. Aun así, exporta una copia antes de borrar datos web o cambiar de dispositivo.'
+      :'RosterHome usa IndexedDB, pero Safari no garantiza todavía que nunca pueda purgar estos datos. La copia de seguridad JSON evita tener que reimportar los rosters.';
+  }
+  $('backupData')?.addEventListener('click',async()=>{
+    try{saveState({immediate:true});await window.RosterStorage?.flush();window.RosterStorage?.downloadBackup(state);}
+    catch(err){alert('No se pudo crear la copia: '+(err?.message||err));}
+  });
+  $('restoreData')?.addEventListener('click',()=>{$('restoreDataFile')?.click();});
+  $('restoreDataFile')?.addEventListener('change',async e=>{
+    const file=e.target.files?.[0]; if(!file)return;
+    try{
+      const restored=await window.RosterStorage.readBackupFile(file);
+      const names=(restored.people||[]).slice(0,2).map(p=>p.name||'Perfil').join(' + ');
+      if(!confirm(`¿Restaurar esta copia de ${names}?\n\nReemplazará los rosters y reglas guardados actualmente en este dispositivo.`)){e.target.value='';return;}
+      state=normalizeState(restored);
+      durableStorageReady=true;
+      saveState({immediate:true});
+      await window.RosterStorage.flush();
+      syncInputs();syncPersonalRuleNames();renderCalendar();
+      if($('summaryView')?.classList.contains('active'))renderSummary();
+      await refreshStorageStatus();
+      alert('Copia restaurada correctamente.');
+    }catch(err){alert(err?.message||'No se pudo restaurar la copia.');}
+    finally{e.target.value='';}
+  });
+  window.addEventListener('rh-storage-ready',refreshStorageStatus);
+  window.addEventListener('rh-storage-saved',refreshStorageStatus);
+  window.addEventListener('rh-storage-restored',()=>{syncPersonalRuleNames();refreshStorageStatus();});
+  window.addEventListener('rh-storage-error',()=>{if($('storageBadge')){$('storageBadge').className='storage-badge bad';$('storageBadge').textContent='Error al guardar';}});
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')window.RosterStorage?.flush();});
+  window.addEventListener('pagehide',()=>window.RosterStorage?.flush());
+  initializeDurableStorage().then(refreshStorageStatus);
 })();

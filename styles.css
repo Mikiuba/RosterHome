@@ -358,3 +358,15 @@ button.event.calendar-block.recovery.full{
 .simple-recovery-overlay-note b,.recovery-in-window b{font-size:12px;color:#ffd57a}
 .simple-recovery-overlay-note span,.recovery-in-window span{font-size:11px;line-height:1.35;color:var(--muted)}
 .recovery-couple-note{margin-top:10px}
+
+/* v0.3.2 · durable storage / backup controls */
+.storage-card{margin-top:22px;padding-top:20px;border-top:1px solid var(--line,#d9dde5)}
+.storage-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
+.storage-heading h3{margin:0 0 4px}.storage-heading p{margin:0}
+.storage-badge{display:inline-flex;align-items:center;white-space:nowrap;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:750;background:#eef1f6;color:#5b6472}
+.storage-badge.ok{background:#e8f8ed;color:#18783b}.storage-badge.warn{background:#fff4d6;color:#8b6200}.storage-badge.bad{background:#ffe8e8;color:#9c2727}.storage-badge.checking{background:#eef1f6;color:#5b6472}
+.storage-status-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}
+.storage-status-grid>div{border:1px solid var(--line,#dfe3ea);background:var(--soft,#f7f8fa);border-radius:13px;padding:11px 12px;min-width:0}
+.storage-status-grid span{display:block;font-size:11px;color:var(--muted,#6f7785);margin-bottom:5px}.storage-status-grid b{display:block;font-size:13px;line-height:1.3;overflow-wrap:anywhere}
+.storage-help{font-size:12px;line-height:1.45}.storage-actions{margin-top:10px}
+@media(max-width:700px){.storage-heading{align-items:center}.storage-status-grid{grid-template-columns:1fr}.storage-actions{display:grid;grid-template-columns:1fr 1fr}.storage-actions .btn{width:100%}}

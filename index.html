@@ -225,6 +225,24 @@
         <div><label>Margen comida/cena (min)</label><input id="mealFlex" type="number" min="0" max="180" value="60"></div>
       </div>
       <div class="actions"><button class="btn primary" id="saveRules">Guardar reglas</button><button class="btn" id="exportIcs">Exportar calendario HOME (.ics)</button></div>
+
+      <div class="storage-card" id="storageCard">
+        <div class="storage-heading">
+          <div><h3>💾 Datos y persistencia</h3><p class="muted">El roster se guarda en IndexedDB y se conserva también una copia rápida local.</p></div>
+          <span class="storage-badge checking" id="storageBadge">Comprobando…</span>
+        </div>
+        <div class="storage-status-grid">
+          <div><span>Roster guardado</span><b id="storageSaved">—</b></div>
+          <div><span>Persistencia iOS/Safari</span><b id="storagePersisted">—</b></div>
+          <div><span>Último guardado</span><b id="storageLastSaved">—</b></div>
+        </div>
+        <p class="storage-help muted" id="storageHelp">Aunque iOS conceda persistencia, una copia de seguridad sigue siendo recomendable antes de borrar Safari, cambiar de iPhone o limpiar datos web.</p>
+        <div class="actions storage-actions">
+          <button class="btn primary" id="backupData" type="button">Exportar copia</button>
+          <button class="btn" id="restoreData" type="button">Restaurar copia</button>
+          <input id="restoreDataFile" type="file" accept="application/json,.json" hidden>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -245,7 +263,7 @@
     <div class="card" style="margin-top:16px"><h3>⚖️ Carga del mes</h3><p class="muted">Comparación rápida para ver quién llega con más carga, noches o recoveries.</p><div id="workloadCompare" class="workload-compare"></div></div>
   </section>
 
-  <div class="footer">MVP local · RosterHome v0.3.1 · El módulo FTL está preparado pero todavía no calcula legalidad.</div>
+  <div class="footer">MVP local · RosterHome v0.3.2 · El módulo FTL está preparado pero todavía no calcula legalidad.</div>
 </div>
 
 <div id="eventModal" class="modal hidden" aria-hidden="true">
@@ -263,8 +281,9 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="roster-parser.js?v=0.3.1b"></script>
-<script src="app.js?v=0.3.1b"></script>
-<script src="enhancements.js?v=0.3.1b"></script>
+<script src="storage.js?v=0.3.2"></script>
+<script src="roster-parser.js?v=0.3.2"></script>
+<script src="app.js?v=0.3.2"></script>
+<script src="enhancements.js?v=0.3.2"></script>
 </body>
 </html>

@@ -1,41 +1,47 @@
-# RosterHome — v0.3.1
+# RosterHome — v0.3.2
 
-## Cambio de esta revisión
+## Persistencia de rosters
 
-La hora de **Briefing** queda anclada exclusivamente a la salida (chocks/off-block) del **primer vuelo del duty**.
+Esta versión refuerza el guardado local para evitar tener que reimportar los rosters después de periodos largos sin abrir la app.
 
-**Fórmula:**
+### Cómo se guarda ahora
 
-`Briefing = salida del primer vuelo − antelación configurada`
+1. **IndexedDB** es la copia durable principal del estado de RosterHome.
+2. **localStorage** se mantiene como copia rápida y para migrar automáticamente datos de versiones anteriores.
+3. Al arrancar, RosterHome solicita `navigator.storage.persist()` cuando el navegador lo soporta.
+4. Si Safari/iOS eliminó `localStorage` pero IndexedDB sigue disponible, RosterHome restaura automáticamente el estado durable.
+5. Los cambios se escriben en IndexedDB de forma diferida y se fuerzan al ocultar/cerrar la app.
 
-Ejemplo: si el primer vuelo sale a **20:45 UTC** y la antelación configurada es **105 min**, el briefing es a **19:00 UTC**, aunque CrewLink muestre un C/I/duty a las **19:45 UTC**.
+La app sigue siendo local: ningún roster se envía a un servidor.
 
-El C/I se conserva como dato del duty, pero ya no es la referencia para calcular el briefing.
+## Copia de seguridad
 
-En el detalle del evento se muestran por separado:
-- Hora de briefing.
-- Salida/chocks del primer vuelo.
-- C/I de CrewLink.
-- Antelación configurada.
+En **Reglas → Datos y persistencia** se muestran:
+- si hay roster guardado;
+- si Safari/iOS ha concedido almacenamiento persistente;
+- el último guardado.
 
-El bloque visual de briefing termina en el C/I cuando el briefing comienza antes del report, evitando solaparlo visualmente con todo el duty. La hora de briefing sigue siendo exactamente `chocks − X`.
+También están disponibles:
+- **Exportar copia**: descarga un JSON con ambos rosters, reglas, configuración y estado de la app.
+- **Restaurar copia**: reemplaza el estado local por una copia previamente exportada.
 
-## Actualización desde v0.3
+Aunque Safari conceda persistencia, se recomienda exportar una copia antes de borrar datos web, desinstalar la PWA o cambiar de dispositivo.
 
-Sustituye en GitHub:
+## Migración desde v0.3.1
+
+No hace falta reimportar los rosters. Al abrir v0.3.2 por primera vez, el estado existente en `localStorage` se migra automáticamente a IndexedDB.
+
+## Actualización en GitHub
+
+Sustituye:
 - `index.html`
+- `app.js`
 - `enhancements.js`
+- `styles.css`
 - `service-worker.js`
+- `README.md`
 
-No hace falta reimportar los rosters.
+Añade el archivo nuevo:
+- `storage.js`
 
-
-## Recovery y tiempo juntos — revisión v0.3.1
-
-- **Recovery parcial y recovery completo cuentan ambos como tiempo potencial juntos en casa.**
-- Recovery ya no bloquea las ventanas compartidas, ni por sí solo impide considerar compatible una comida o una cena.
-- En la vista completa, la **Ventana juntos** se dibuja como capa base y el **Recovery** se superpone con tramado ámbar/rojo. Así se ve simultáneamente que podéis estar juntos y que ese periodo debe mantenerse tranquilo.
-- En la vista Simple y en Resumen se indica cuando la mejor ventana incluye recovery.
-- Duty, briefing y sueño protegido siguen bloqueando la disponibilidad compartida.
-
-Esto es lógica doméstica de RosterHome, no una evaluación FTL.
+No hace falta modificar `roster-parser.js` ni reimportar ningún roster.

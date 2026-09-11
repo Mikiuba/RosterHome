@@ -14,11 +14,15 @@ const DEFAULT_STATE = {
   focusDate:new Date().toISOString().slice(0,10)
 };
 
+let BOOT_LOCAL_RAW=null;
+try{BOOT_LOCAL_RAW=localStorage.getItem('rosterhome-state');}catch(_){ }
+const BOOT_HAD_LOCAL_STATE = !!BOOT_LOCAL_RAW;
+let durableStorageReady = false;
 let state = loadState();
 let renderedEvents = new Map();
 let eventCounter = 0;
 let calendarRenderFrame = 0;
-const STATE_SCHEMA_VERSION = 5;
+const STATE_SCHEMA_VERSION = 6;
 
 function dutyIdentity(d){
   if(!d) return '';
@@ -42,31 +46,64 @@ function dedupeDuties(list){
 }
 
 function clone(x){ return JSON.parse(JSON.stringify(x)); }
-function loadState(){
-  try{
-    const saved=JSON.parse(localStorage.getItem('rosterhome-state')||'{}');
-    const base=clone(DEFAULT_STATE);
-    const people=[0,1].map(i=>{
-      const person={...base.people[i], ...(saved.people?.[i]||{})};
-      person.duties=dedupeDuties(person.duties||[]);
-      return person;
-    });
-    const rules={...base.rules, ...(saved.rules||{})};
-    const month=saved.month || base.month;
-    return {
-      ...base,
-      ...saved,
-      schemaVersion:STATE_SCHEMA_VERSION,
-      people,
-      rules,
-      month,
-      calendarMode:['month','week','day'].includes(saved.calendarMode)?saved.calendarMode:'month',
-      calendarDensity:['simple','full'].includes(saved.calendarDensity)?saved.calendarDensity:'simple',
-      focusDate:saved.focusDate || `${month}-01`
-    };
-  }catch(e){ return clone(DEFAULT_STATE); }
+function normalizeState(saved={}){
+  const base=clone(DEFAULT_STATE);
+  const people=[0,1].map(i=>{
+    const person={...base.people[i], ...(saved.people?.[i]||{})};
+    person.duties=dedupeDuties(person.duties||[]);
+    return person;
+  });
+  const rules={...base.rules, ...(saved.rules||{})};
+  const month=saved.month || base.month;
+  return {
+    ...base,
+    ...saved,
+    schemaVersion:STATE_SCHEMA_VERSION,
+    people,
+    rules,
+    month,
+    calendarMode:['month','week','day'].includes(saved.calendarMode)?saved.calendarMode:'month',
+    calendarDensity:['simple','full'].includes(saved.calendarDensity)?saved.calendarDensity:'simple',
+    focusDate:saved.focusDate || `${month}-01`
+  };
 }
-function saveState(){ state.schemaVersion=STATE_SCHEMA_VERSION; localStorage.setItem('rosterhome-state', JSON.stringify(state)); }
+function loadState(){
+  try{return normalizeState(JSON.parse(localStorage.getItem('rosterhome-state')||'{}'));}
+  catch(e){ return normalizeState({}); }
+}
+function saveState(options={}){
+  state.schemaVersion=STATE_SCHEMA_VERSION;
+  if(durableStorageReady && !options.preserveTimestamp) state.lastSavedAt=new Date().toISOString();
+  try{localStorage.setItem('rosterhome-state', JSON.stringify(state));}catch(err){console.warn('[RosterHome] localStorage no disponible',err);}
+  if(durableStorageReady && window.RosterStorage) window.RosterStorage.saveState(state,{immediate:!!options.immediate});
+}
+async function initializeDurableStorage(){
+  if(!window.RosterStorage) return;
+  let dbState=null;
+  try{dbState=await window.RosterStorage.loadState();}catch(_){ }
+  let restored=false;
+  if(dbState){
+    const localTs=state.lastSavedAt?Date.parse(state.lastSavedAt):0;
+    const dbTs=dbState.lastSavedAt?Date.parse(dbState.lastSavedAt):0;
+    // If Safari cleared localStorage, IndexedDB is authoritative. If both exist,
+    // prefer the newest durable snapshot rather than silently replacing newer edits.
+    if(!BOOT_HAD_LOCAL_STATE || (dbTs && dbTs>localTs)){
+      state=normalizeState(dbState);
+      restored=true;
+    }
+  }
+  durableStorageReady=true;
+  state.storageMigratedAt=state.storageMigratedAt||new Date().toISOString();
+  saveState({immediate:true});
+  try{await window.RosterStorage.requestPersistence();}catch(_){ }
+  if(restored){
+    try{syncInputs();}catch(_){ }
+    try{renderCalendar();}catch(_){ }
+    try{if(document.getElementById('summaryView')?.classList.contains('active'))renderSummary();}catch(_){ }
+    window.dispatchEvent(new CustomEvent('rh-storage-restored'));
+  }
+  window.dispatchEvent(new CustomEvent('rh-storage-ready',{detail:{restored}}));
+}
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function ms(h){ return h*3600000; }
@@ -685,7 +722,7 @@ function mergeParsed(personIndex, parsed, source){
   state.people[personIndex].source=source;
   if(parsed.crew?.name && !state.people[personIndex].name) state.people[personIndex].name=parsed.crew.name;
   if(parsed.period){const s=parsed.period.start; state.month=`${s.getUTCFullYear()}-${String(s.getUTCMonth()+1).padStart(2,'0')}`; state.focusDate=parsed.period.start.toISOString().slice(0,10);}
-  saveState(); syncInputs(); renderCalendar();
+  saveState({immediate:true}); syncInputs(); renderCalendar();
   return incoming.filter(x=>x.kind==='duty').length;
 }
 
