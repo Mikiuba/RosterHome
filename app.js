@@ -666,16 +666,136 @@ function eventDetailHtml(e){
 }
 
 
+function ftlMinutes(value){
+  const h=RosterParser?.parseDuration?.(value); return h==null?null:Math.round(h*60);
+}
+function ftlFormatMinutes(value){return window.RosterHomeFTL?.formatMinutes?.(value)||gapLabel(value);}
+function ftlReferenceZone(d,profileBase){
+  const ref=(d?.acc||profileBase||d?.base||'').toUpperCase();
+  return RosterParser?.airportTimeZone?.(ref)||d?.sourceCheckInTimeZone||'UTC';
+}
+function ftlCivilAt(instant,timeZone){
+  const parts=new Intl.DateTimeFormat('en-CA',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(new Date(instant));
+  const o=Object.fromEntries(parts.map(p=>[p.type,p.value]));
+  return `${o.year}-${o.month}-${o.day}T${o.hour}:${o.minute}:${o.second}`;
+}
+function ftlProfileBase(duties){
+  const counts=new Map();
+  duties.forEach(d=>{const b=String(d.base||'').toUpperCase();if(b)counts.set(b,(counts.get(b)||0)+1);});
+  return [...counts.entries()].sort((a,b)=>b[1]-a[1])[0]?.[0]||null;
+}
+function ftlTypeLabel(flags){
+  const xs=[];if(flags?.night)xs.push('NIGHT');if(flags?.early)xs.push('EARLY');if(flags?.late)xs.push('LATE');return xs.join(' + ')||'NORMAL';
+}
+function ftlStatusWord(status){return status==='bad'?'NON-COMPLIANT':status==='review'?'REVIEW':'COMPLIANT';}
+function ftlCheck(label,text,status='ok'){
+  return `<div class="ftl-check"><span>${esc(label)}</span><b>${esc(text)}</b><i class="${status}">${status==='bad'?'✕':status==='review'?'!':'✓'}</i></div>`;
+}
 function renderFtl(){
+  const engine=window.RosterHomeFTL;
   const all=state.people.flatMap(p=>p.duties||[]);
   const duties=all.filter(d=>d.kind==='duty');
-  const withRoster=state.people.filter(p=>(p.duties||[]).length>0).length;
+  const withRoster=state.people.filter(p=>(p.duties||[]).some(d=>d.kind==='duty')).length;
   if($('ftlDuties')) $('ftlDuties').textContent=String(duties.length);
   if($('ftlPeople')) $('ftlPeople').textContent=`${withRoster}/2`;
   if($('ftlPeriod')){
     const dates=duties.map(d=>String(d.date||d.checkIn||'').slice(0,10)).filter(Boolean).sort();
     $('ftlPeriod').textContent=dates.length?`${dates[0].slice(8,10)}/${dates[0].slice(5,7)} – ${dates.at(-1).slice(8,10)}/${dates.at(-1).slice(5,7)}`:'—';
   }
+  if(!engine){
+    if($('ftlOverall'))$('ftlOverall').textContent='ERROR';
+    if($('ftlSummaryLine'))$('ftlSummaryLine').textContent='No se ha cargado ftl-engine.js.';
+    if($('ftlDutyResults'))$('ftlDutyResults').innerHTML='<div class="notice">No se pudo cargar el motor FTL.</div>';
+    return;
+  }
+  if(!duties.length){
+    if($('ftlOverall'))$('ftlOverall').textContent='—';
+    if($('ftlDutyResults'))$('ftlDutyResults').innerHTML='<div class="muted">Importa un roster para analizarlo.</div>';
+    return;
+  }
+
+  let badCount=0,reviewCount=0,okCount=0;
+  const peopleHtml=[];
+  state.people.forEach((person,pi)=>{
+    const ds=dedupeDuties(person.duties||[]).filter(d=>d.kind==='duty'&&d.checkIn&&d.checkout).sort((a,b)=>a.checkIn.localeCompare(b.checkIn));
+    if(!ds.length)return;
+    const base=ftlProfileBase(ds);
+    const baseTz=RosterParser?.airportTimeZone?.(base)||state.rules.homeTz||'UTC';
+    const records=ds.map(d=>({
+      endMs:new Date(d.checkout).getTime(),
+      dutyMinutes:ftlMinutes(d.dt)??Math.round((new Date(d.checkout)-new Date(d.checkIn))/60000),
+      flightMinutes:ftlMinutes(d.ft)||0
+    }));
+    const coverageDates=(person.duties||[]).map(x=>String(x.date||x.checkIn||'').slice(0,10)).filter(Boolean).sort();
+    const coverageStartMs=coverageDates.length?new Date(`${coverageDates[0]}T00:00:00Z`).getTime():new Date(ds[0].checkIn).getTime();
+    let rows='';
+    ds.forEach((d,i)=>{
+      const tz=ftlReferenceZone(d,base),civilStart=ftlCivilAt(d.checkIn,tz),civilEnd=ftlCivilAt(d.checkout,tz);
+      const flags=engine.classifyDisruptiveDuty(civilStart,civilEnd),sectors=Math.max(1,d.flights?.length||1);
+      const actualFdp=ftlMinutes(d.fdp)??ftlMinutes(d.fdt),basicMax=engine.table2MaxForCivil(civilStart,sectors),crewMax=ftlMinutes(d.max);
+      const xfdp=ftlMinutes(d.xfdp);
+      const checks=[];let status='ok';
+
+      if(actualFdp!=null&&basicMax!=null){
+        if(actualFdp<=basicMax){checks.push(['FDP básico',`${ftlFormatMinutes(actualFdp)} / ${ftlFormatMinutes(basicMax)} máx. · ${sectors} sector${sectors===1?'':'es'}`,'ok']);}
+        else if(xfdp&&actualFdp<=xfdp){checks.push(['FDP básico',`${ftlFormatMinutes(actualFdp)} > ${ftlFormatMinutes(basicMax)} básico; xFDP CrewLink ${ftlFormatMinutes(xfdp)}`,'review']);status='review';}
+        else{checks.push(['FDP básico',`${ftlFormatMinutes(actualFdp)} > ${ftlFormatMinutes(basicMax)} máx.`,'bad']);status='bad';}
+      }else checks.push(['FDP básico','Datos insuficientes para comparar','review']),status='review';
+      if(crewMax!=null&&basicMax!=null&&Math.abs(crewMax-basicMax)>1){checks.push(['CrewLink max',`${ftlFormatMinutes(crewMax)} vs Tabla 2 ${ftlFormatMinutes(basicMax)}`,'review']);if(status==='ok')status='review';}
+
+      checks.push(['Disruptive',`${ftlTypeLabel(flags)} · ref. ${d.acc||base||d.base||'—'} (${tz})`,'ok']);
+      const crewType=String(d.type||'').toUpperCase();
+      if(crewType&&crewType!=='N/A'&&crewType!=='NORMAL'&&!crewType.includes(flags.primaryType)){
+        checks.push(['TYPE CrewLink',`${crewType} ≠ cálculo ${flags.primaryType}`,'review']);if(status==='ok')status='review';
+      }
+
+      if(i>0){
+        const prev=ds[i-1],home=String(d.base||'').toUpperCase()===base;
+        const prevDuty=ftlMinutes(prev.dt)??Math.round((new Date(prev.checkout)-new Date(prev.checkIn))/60000);
+        const actualRest=Math.round((new Date(d.checkIn)-new Date(prev.checkout))/60000);
+        const requiredRest=engine.minimumRestMinutes(prevDuty,home);
+        const restStatus=actualRest>=requiredRest?'ok':'bad';
+        checks.push(['Descanso mínimo',`${ftlFormatMinutes(actualRest)} / ${ftlFormatMinutes(requiredRest)} req. · ${home?'base':'fuera de base'}`,restStatus]);
+        if(restStatus==='bad')status='bad';
+
+        if(home){
+          const transition=engine.validateDisruptiveTransition(
+            {start:ftlCivilAt(prev.checkIn,baseTz),end:ftlCivilAt(prev.checkout,baseTz)},
+            {start:ftlCivilAt(d.checkIn,baseTz),end:ftlCivilAt(d.checkout,baseTz)},
+            {atHomeOrOperatingBase:true}
+          );
+          if(transition.requiresLocalNight){
+            const trStatus=transition.compliant?'ok':'bad';
+            checks.push(['LATE/NIGHT → EARLY',`${transition.localNights} local night${transition.localNights===1?'':'s'} entre FDPs`,trStatus]);
+            if(trStatus==='bad')status='bad';
+          }else{
+            checks.push(['Transición',`${ftlTypeLabel(transition.previous)} → ${ftlTypeLabel(transition.next)} · no exige Local Night`,'ok']);
+          }
+        }
+      }else checks.push(['Descanso previo','No hay duty anterior dentro del roster importado','review']);
+
+      const cum=engine.cumulativeAt(records,i),cumValidation=engine.validateCumulative(cum);
+      for(const c of cumValidation.checks){
+        const days=Number(c.label.match(/\d+/)?.[0]||28),windowStart=records[i].endMs-days*86400000,complete=coverageStartMs<=windowStart;
+        const cStatus=!c.compliant?'bad':complete?'ok':'review';
+        checks.push([c.label,`${ftlFormatMinutes(c.actual)} / ${ftlFormatMinutes(c.limit)}${complete?'':' · historial parcial'}`,cStatus]);
+        if(cStatus==='bad')status='bad';
+      }
+
+      if(status==='bad')badCount++;else if(status==='review')reviewCount++;else okCount++;
+      const date=String(d.date||d.checkIn).slice(0,10),route=d.route||d.base||'Duty';
+      const report=ftlCivilAt(d.checkIn,tz).slice(11,16),co=ftlCivilAt(d.checkout,tz).slice(11,16);
+      rows+=`<details class="ftl-duty-row"><summary><div class="ftl-duty-main"><b>${esc(date.slice(8,10)+'/'+date.slice(5,7))} · ${esc(report)}–${esc(co)}</b><small>${esc(ftlTypeLabel(flags))}</small></div><div class="ftl-duty-route"><b>${esc(route)}</b><small>FDP ${esc(ftlFormatMinutes(actualFdp))} · max ${esc(ftlFormatMinutes(basicMax))}</small></div><span class="ftl-badge ${status}">${ftlStatusWord(status)}</span></summary><div class="ftl-duty-body">${checks.map(c=>ftlCheck(c[0],c[1],c[2])).join('')}<div class="ftl-note">Base inferida del perfil: ${esc(base||'—')}. Las ventanas acumuladas solo se declaran completas cuando el roster importado contiene todo el periodo necesario.</div></div></details>`;
+    });
+    peopleHtml.push(`<section class="ftl-person-block"><div class="ftl-person-title"><b>${esc(person.name||`Perfil ${pi+1}`)}</b><span>Base inferida: ${esc(base||'—')}</span></div>${rows}</section>`);
+  });
+
+  if($('ftlDutyResults'))$('ftlDutyResults').innerHTML=peopleHtml.join('');
+  const total=badCount+reviewCount+okCount;
+  const overall=badCount?'NON-COMPLIANT':reviewCount?'REVIEW':'COMPLIANT';
+  if($('ftlOverall'))$('ftlOverall').textContent=overall;
+  if($('ftlResultMetric'))$('ftlResultMetric').className=`ftl-metric ${badCount?'bad':reviewCount?'review':'good'}`;
+  if($('ftlSummaryLine'))$('ftlSummaryLine').textContent=`${okCount} compliant · ${reviewCount} review · ${badCount} non-compliant · ${total} duties`;
 }
 
 function renderSummary(){
@@ -820,7 +940,7 @@ function exportIcs(){
   const blob=new Blob([ics],{type:'text/calendar;charset=utf-8'}); const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`RosterHome-${state.month}.ics`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
 
-// UI wiring — v0.4.0
+// UI wiring — v0.3.2.3 validated binding
 function on(el,event,handler,options){
   if(el && typeof el.addEventListener==='function') el.addEventListener(event,handler,options);
 }
@@ -855,4 +975,4 @@ on(document,'keydown',e=>{if(e.key==='Escape'&&$('eventModal')&&!$('eventModal')
 // Navigation is bound once above. Keep a single source of truth for taps.
 try{syncInputs();}catch(err){console.error('[RosterHome] No se pudieron sincronizar inputs',err);}
 try{renderCalendar();}catch(err){console.error('[RosterHome] Render inicial en fallback',err);}
-if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./service-worker.js?v=0.4.0').catch(()=>{});
+if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./service-worker.js?v=0.3.3').catch(()=>{});

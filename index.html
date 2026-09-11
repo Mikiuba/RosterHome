@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b1020" />
   <title>RosterHome</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=0.4.0" />
+  <link rel="stylesheet" href="styles.css?v=0.3.3" />
 </head>
 <body>
 <div class="app">
@@ -148,45 +148,62 @@
     <div class="card ftl-card">
       <div class="ftl-head">
         <div>
-          <div class="ftl-kicker">Corendon Airlines Europe · OM-A Chapter 7</div>
+          <div class="ftl-kicker">Flight Time Limitations</div>
           <h2>FTL</h2>
-          <p class="muted">Análisis independiente del roster frente al esquema FTL del OM-A. Cuando falta un dato necesario, RosterHome devuelve <b>INDETERMINATE</b> en lugar de asumir.</p>
+          <p class="muted">Validación automática del roster contra las reglas núcleo del OM-A Ch. 7 de Corendon Airlines Europe.</p>
         </div>
-        <div id="ftlOverallStatus" class="ftl-status-live ind"><span class="ftl-badge ind">? INDETERMINATE</span></div>
+        <span class="ftl-status ok" id="ftlEngineStatus">Motor FTL · OM-A core v0.3.3</span>
       </div>
 
-      <div class="notice ftl-warning"><b>Uso:</b> herramienta de comprobación y planificación. El OM-A cargado está marcado como “Uncontrolled document”; para una decisión operacional prevalecen el roster oficial, el manual controlado y Crew Planning/OCC.</div>
+      <div class="notice ftl-warning"><b>Ámbito:</b> valida FDP básico (Tabla 2), descanso mínimo, límites acumulados y disruptive schedules. Los casos que dependen de extensión planificada, split duty, standby, posicionamiento especial o estado de aclimatación no inferible se marcan para revisión en vez de declararlos ilegales.</div>
 
       <div class="ftl-overview">
         <div class="ftl-metric"><span>Duties importados</span><b id="ftlDuties">0</b></div>
         <div class="ftl-metric"><span>Perfiles con roster</span><b id="ftlPeople">0/2</b></div>
-        <div class="ftl-metric"><span>Periodo cargado</span><b id="ftlPeriod">—</b></div>
-        <div class="ftl-metric"><span>Fuente</span><b>OM-A Ch.7</b></div>
+        <div class="ftl-metric"><span>Periodo visible</span><b id="ftlPeriod">—</b></div>
+        <div class="ftl-metric" id="ftlResultMetric"><span>Resultado FTL</span><b id="ftlOverall">—</b></div>
       </div>
 
-      <div class="ftl-profile-switch" role="group" aria-label="Perfil FTL">
-        <button type="button" class="active" data-ftl-profile="0">Miguel</button>
-        <button type="button" data-ftl-profile="1">Nicole</button>
+      <div class="ftl-section">
+        <div class="ftl-section-head"><h3>Resultado por duty</h3><span class="muted" id="ftlSummaryLine">Importa un roster para analizarlo.</span></div>
+        <div id="ftlDutyResults" class="ftl-duty-results"></div>
       </div>
 
-      <div class="ftl-config">
-        <div class="ftl-config-head"><div><b id="ftlProfileTitle">Perfil</b><span>Datos necesarios para aplicar reference time y la regla específica de cabin crew.</span></div><button type="button" class="btn primary" id="saveFtlSettings">Guardar FTL</button></div>
-        <div class="rulegrid ftl-rulegrid">
-          <div><label>Rol</label><select id="ftlRole"><option value="flight">Flight crew</option><option value="cabin">Cabin crew</option></select></div>
-          <div><label>Home / Operating Base (IATA)</label><input id="ftlHomeBase" maxlength="3" placeholder="HER"></div>
-          <div id="ftlCabinLeadWrap" hidden><label>Cabin report antes que flight crew (min)</label><input id="ftlCabinLead" type="number" min="0" max="60" value="0"><small>0 si reportan a la vez. OM-A 7.1.7.3: diferencia máxima 60 min.</small></div>
+      <div class="ftl-section">
+        <h3>Reglas activas</h3>
+        <div class="ftl-grid">
+          <article><b>FDP máximo · OM-A 7.1.7.2.1</b><span>Tabla 2 por reporting time y número de sectores para crew aclimatizada.</span></article>
+          <article><b>Descanso · OM-A 7.1.17.1/2</b><span>Base: max(duty previo, 12 h). Fuera de base: max(duty previo, 10 h).</span></article>
+          <article><b>Acumulados · OM-A 7.1.11</b><span>60 h/7 d, 110 h/14 d, 190 h/28 d de duty y 100 h/28 d de vuelo.</span></article>
+          <article><b>EARLY</b><span>Early Type: duty que empieza entre 05:00 y 05:59.</span></article>
+          <article><b>LATE</b><span>Early Type: duty que termina entre 23:00 y 01:59.</span></article>
+          <article><b>NIGHT</b><span>Duty que invade cualquier parte de 02:00–04:59. No se convierte en EARLY por empezar antes de 05:00.</span></article>
         </div>
       </div>
 
-      <div class="ftl-subtabs" role="group" aria-label="Sección FTL">
-        <button type="button" class="active" data-ftl-section="duties">Duty</button>
-        <button type="button" data-ftl-section="sequence">Secuencia</button>
-        <button type="button" data-ftl-section="cumulative">Acumulados</button>
-        <button type="button" data-ftl-section="reference">Referencia</button>
-      </div>
-
-      <div class="ftl-quick" id="ftlQuick"></div>
-      <div id="ftlBody" class="ftl-body"></div>
+      <details class="ftl-section ftl-table-details">
+        <summary><b>Tabla 2 · FDP máximo básico frente a reporting time</b></summary>
+        <div class="ftl-table-wrap">
+          <table class="ftl-table">
+            <thead><tr><th>Start FDP</th><th>1–2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th><th>10</th></tr></thead>
+            <tbody>
+              <tr><th>06:00–13:29</th><td>13:00</td><td>12:30</td><td>12:00</td><td>11:30</td><td>11:00</td><td>10:30</td><td>10:00</td><td>09:30</td><td>09:00</td></tr>
+              <tr><th>13:30–13:59</th><td>12:45</td><td>12:15</td><td>11:45</td><td>11:15</td><td>10:45</td><td>10:15</td><td>09:45</td><td>09:15</td><td>09:00</td></tr>
+              <tr><th>14:00–14:29</th><td>12:30</td><td>12:00</td><td>11:30</td><td>11:00</td><td>10:30</td><td>10:00</td><td>09:30</td><td>09:00</td><td>09:00</td></tr>
+              <tr><th>14:30–14:59</th><td>12:15</td><td>11:45</td><td>11:15</td><td>10:45</td><td>10:15</td><td>09:45</td><td>09:15</td><td>09:00</td><td>09:00</td></tr>
+              <tr><th>15:00–15:29</th><td>12:00</td><td>11:30</td><td>11:00</td><td>10:30</td><td>10:00</td><td>09:30</td><td>09:00</td><td>09:00</td><td>09:00</td></tr>
+              <tr><th>15:30–15:59</th><td>11:45</td><td>11:15</td><td>10:45</td><td>10:15</td><td>09:45</td><td>09:15</td><td>09:00</td><td>09:00</td><td>09:00</td></tr>
+              <tr><th>16:00–16:29</th><td>11:30</td><td>11:00</td><td>10:30</td><td>10:00</td><td>09:30</td><td>09:00</td><td>09:00</td><td>09:00</td><td>09:00</td></tr>
+              <tr><th>16:30–16:59</th><td>11:15</td><td>10:45</td><td>10:15</td><td>09:45</td><td>09:15</td><td>09:00</td><td>09:00</td><td>09:00</td><td>09:00</td></tr>
+              <tr><th>17:00–04:59</th><td>11:00</td><td>10:30</td><td>10:00</td><td>09:30</td><td>09:00</td><td>09:00</td><td>09:00</td><td>09:00</td><td>09:00</td></tr>
+              <tr><th>05:00–05:14</th><td>12:00</td><td>11:30</td><td>11:00</td><td>10:30</td><td>10:00</td><td>09:30</td><td>09:00</td><td>09:00</td><td>09:00</td></tr>
+              <tr><th>05:15–05:29</th><td>12:15</td><td>11:45</td><td>11:15</td><td>10:45</td><td>10:15</td><td>09:45</td><td>09:15</td><td>09:00</td><td>09:00</td></tr>
+              <tr><th>05:30–05:44</th><td>12:30</td><td>12:00</td><td>11:30</td><td>11:00</td><td>10:30</td><td>10:00</td><td>09:30</td><td>09:00</td><td>09:00</td></tr>
+              <tr><th>05:45–05:59</th><td>12:45</td><td>12:15</td><td>11:45</td><td>11:15</td><td>10:45</td><td>10:15</td><td>09:45</td><td>09:15</td><td>09:00</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
     </div>
   </section>
 
@@ -266,7 +283,7 @@
     <div class="card" style="margin-top:16px"><h3>⚖️ Carga del mes</h3><p class="muted">Comparación rápida para ver quién llega con más carga, noches o recoveries.</p><div id="workloadCompare" class="workload-compare"></div></div>
   </section>
 
-  <div class="footer">RosterHome v0.4.0 · FTL basado en OM-A Chapter 7 · análisis local y conservador</div>
+  <div class="footer">MVP local · RosterHome v0.3.3 · Motor FTL OM-A core activo.</div>
 </div>
 
 <div id="eventModal" class="modal hidden" aria-hidden="true">
@@ -284,10 +301,10 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="storage.js?v=0.4.0"></script>
-<script src="roster-parser.js?v=0.4.0"></script>
-<script src="app.js?v=0.4.0"></script>
-<script src="enhancements.js?v=0.4.0"></script>
-<script src="ftl.js?v=0.4.0"></script>
+<script src="storage.js?v=0.3.3"></script>
+<script src="roster-parser.js?v=0.3.3"></script>
+<script src="ftl-engine.js?v=0.3.3"></script>
+<script src="app.js?v=0.3.3"></script>
+<script src="enhancements.js?v=0.3.3"></script>
 </body>
 </html>

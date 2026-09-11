@@ -1,38 +1,69 @@
-# RosterHome v0.4.0
+# RosterHome v0.3.3
 
-## FTL completo — Corendon Airlines Europe OM-A Chapter 7
+Actualización FTL sobre la base estable v0.3.2.3.
 
-Esta versión estrena el motor FTL de RosterHome. La lógica está basada en el OM-A de Corendon Airlines Europe proporcionado para el proyecto. El manual completo es Rev. 20.0 (20-04-2026); las páginas principales del Chapter 7 están en Rev. 15.0 (15-07-2024), con páginas posteriores revisadas según el LEP.
+## FTL activado
 
-### Qué calcula
-- FDP máximo básico, Table 2, según reporting/reference time y número de sectores.
-- Table 3 cuando la aclimatación no puede determinarse.
-- Table 4 como referencia para planned extension sin in-flight rest.
-- Auditoría del `max` de CrewLink contra el máximo calculado por RosterHome.
-- EARLY / LATE / NIGHT con el esquema `Early Type` de TM-CAD.
-- Descanso mínimo en base y fuera de base.
-- Transición LATE/NIGHT → EARLY con requisito de local night.
-- Límites acumulados de duty 7/14/28 días y flight time 28 días.
-- OFF/ROFF mensuales.
-- Reserve consecutivo y standby cuando CrewLink aporta horas.
-- Recurrent extended recovery inferido desde los gaps de roster.
-- Regla de 4+ disruptive duties → siguiente extended recovery ≥60 h.
-- Referencia visual completa de Tables 1–5 y principales reglas del Chapter 7.
+La pestaña **FTL** deja de ser un placeholder e incorpora un motor local basado en Corendon Airlines Europe OM-A Ch. 7 para las reglas que pueden determinarse de forma fiable a partir de un CrewLink individual duty plan:
 
-### Estados
-- `COMPLIANT`: las reglas evaluables con los datos disponibles cumplen.
-- `NON-COMPLIANT`: existe un incumplimiento determinable.
-- `INDETERMINATE`: falta un dato necesario o una condición no puede demostrarse desde el PDF.
+- FDP máximo básico, **Tabla 2**, por reporting time y sectores (OM-A 7.1.7.2.1).
+- Descanso mínimo en Home/Operating Base y fuera de base (OM-A 7.1.17.1/2).
+- Límites acumulados de duty: 60 h / 7 días, 110 h / 14 días, 190 h / 28 días (OM-A 7.1.11.1).
+- Flight time 100 h / 28 días (OM-A 7.1.11.2(a)).
+- Disruptive schedules **Early Type** y Local Night (OM-A definitions + 7.1.17.5).
 
-RosterHome no inventa SAFE, delayed reporting, commander discretion, split duty, airport-vs-home standby ni planned extension cuando el roster no contiene los datos necesarios.
+### Corrección crítica 10/09
 
-### Configuración FTL por perfil
-En la pestaña FTL se configura el rol (flight/cabin), Home/Operating Base y, para cabin crew, cuántos minutos reporta antes que flight crew. OM-A 7.1.7.3 establece que el valor de la tabla se obtiene con el report de flight crew, mientras el FDP de cabin empieza en su propio report; RosterHome añade esa diferencia (máximo 60 min) al límite efectivo de duración de cabin crew.
+La clasificación ya no usa `report < 06:00 = EARLY`.
 
-### Persistencia
-La configuración FTL se guarda dentro del mismo estado persistente de RosterHome. No es necesario volver a importar los rosters al actualizar desde v0.3.2.3.
+- `NIGHT`: duty que invade cualquier parte de **02:00–04:59**.
+- `EARLY`: duty que **empieza 05:00–05:59**.
+- `LATE`: duty que **termina 23:00–01:59**.
+- La exigencia de 1 Local Night solo se activa para **LATE/NIGHT → EARLY** en Home/Operating Base.
 
-### Archivos
-`index.html`, `styles.css`, `app.js`, `enhancements.js`, `storage.js`, `roster-parser.js`, `ftl.js`, `service-worker.js`, `manifest.webmanifest`.
+Por tanto, la secuencia real del 08/09 al 10/09 (`LATE → NIGHT`, report 03:00) no dispara falsamente la regla de transición.
 
-> Herramienta de comprobación/planificación. El OM-A entregado está marcado como `Uncontrolled document`; para una decisión operacional prevalecen el manual controlado, el roster oficial y las instrucciones de Crew Planning/OCC.
+## Estados
+
+- **COMPLIANT**: las comprobaciones automáticas completas del duty pasan.
+- **NON-COMPLIANT**: existe una infracción cuantificable con los datos importados.
+- **REVIEW**: falta historial suficiente o el caso depende de una regla especial que no debe inferirse (por ejemplo una extensión planificada).
+
+La aplicación no inventa legalidad cuando faltan datos. Casos como standby, split duty, posicionamiento especial, extensión planificada o aclimatación no inferible se dejan para revisión.
+
+## UI
+
+La pestaña FTL muestra:
+
+- resultado global;
+- resultado desplegable por duty;
+- clasificación EARLY/LATE/NIGHT;
+- FDP real vs máximo;
+- descanso anterior;
+- transición disruptive;
+- límites acumulados;
+- la **Tabla 2 completa enfrentada al reporting time** en una leyenda desplegable.
+
+## Persistencia y PWA
+
+Se conservan íntegros los arreglos de v0.3.2.3:
+
+- localStorage + IndexedDB;
+- solicitud de almacenamiento persistente;
+- backup/restauración JSON;
+- service worker network-first;
+- hotfixes de interacción iOS/PWA.
+
+## Archivos nuevos / modificados
+
+Nuevo:
+- `ftl-engine.js`
+
+Modificados:
+- `index.html`
+- `app.js`
+- `styles.css`
+- `service-worker.js`
+- `README.md`
+
+`roster-parser.js`, `storage.js`, `enhancements.js` y `manifest.webmanifest` conservan la base estable salvo el cache-busting de carga desde `index.html`.
