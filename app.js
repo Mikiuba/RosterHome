@@ -820,7 +820,7 @@ function exportIcs(){
   const blob=new Blob([ics],{type:'text/calendar;charset=utf-8'}); const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`RosterHome-${state.month}.ics`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
 
-// UI wiring — v0.3.2.3 validated binding
+// UI wiring — v0.4.0
 function on(el,event,handler,options){
   if(el && typeof el.addEventListener==='function') el.addEventListener(event,handler,options);
 }
@@ -855,4 +855,4 @@ on(document,'keydown',e=>{if(e.key==='Escape'&&$('eventModal')&&!$('eventModal')
 // Navigation is bound once above. Keep a single source of truth for taps.
 try{syncInputs();}catch(err){console.error('[RosterHome] No se pudieron sincronizar inputs',err);}
 try{renderCalendar();}catch(err){console.error('[RosterHome] Render inicial en fallback',err);}
-if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./service-worker.js?v=0.3.2.3').catch(()=>{});
+if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./service-worker.js?v=0.4.0').catch(()=>{});

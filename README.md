@@ -1,65 +1,38 @@
-# RosterHome v0.3.2.3
+# RosterHome v0.4.0
 
-Hotfix de interacción iOS/PWA.
+## FTL completo — Corendon Airlines Europe OM-A Chapter 7
 
-- El calendario ya no desactiva `pointer-events` durante cambios de vista.
-- Mes/Semana/Día renderizan de forma síncrona y segura.
-- El cableado de botones es tolerante a elementos/feature modules que fallen.
-- La navegación principal tiene un listener delegado independiente.
-- IndexedDB sigue siendo una mejora: nunca puede bloquear la interfaz.
-- Se mantiene localStorage + IndexedDB + backup JSON.
+Esta versión estrena el motor FTL de RosterHome. La lógica está basada en el OM-A de Corendon Airlines Europe proporcionado para el proyecto. El manual completo es Rev. 20.0 (20-04-2026); las páginas principales del Chapter 7 están en Rev. 15.0 (15-07-2024), con páginas posteriores revisadas según el LEP.
 
-## Persistencia de rosters
+### Qué calcula
+- FDP máximo básico, Table 2, según reporting/reference time y número de sectores.
+- Table 3 cuando la aclimatación no puede determinarse.
+- Table 4 como referencia para planned extension sin in-flight rest.
+- Auditoría del `max` de CrewLink contra el máximo calculado por RosterHome.
+- EARLY / LATE / NIGHT con el esquema `Early Type` de TM-CAD.
+- Descanso mínimo en base y fuera de base.
+- Transición LATE/NIGHT → EARLY con requisito de local night.
+- Límites acumulados de duty 7/14/28 días y flight time 28 días.
+- OFF/ROFF mensuales.
+- Reserve consecutivo y standby cuando CrewLink aporta horas.
+- Recurrent extended recovery inferido desde los gaps de roster.
+- Regla de 4+ disruptive duties → siguiente extended recovery ≥60 h.
+- Referencia visual completa de Tables 1–5 y principales reglas del Chapter 7.
 
-Esta versión refuerza el guardado local para evitar tener que reimportar los rosters después de periodos largos sin abrir la app.
+### Estados
+- `COMPLIANT`: las reglas evaluables con los datos disponibles cumplen.
+- `NON-COMPLIANT`: existe un incumplimiento determinable.
+- `INDETERMINATE`: falta un dato necesario o una condición no puede demostrarse desde el PDF.
 
-### Cómo se guarda ahora
+RosterHome no inventa SAFE, delayed reporting, commander discretion, split duty, airport-vs-home standby ni planned extension cuando el roster no contiene los datos necesarios.
 
-1. **IndexedDB** es la copia durable principal del estado de RosterHome.
-2. **localStorage** se mantiene como copia rápida y para migrar automáticamente datos de versiones anteriores.
-3. Al arrancar, RosterHome solicita `navigator.storage.persist()` cuando el navegador lo soporta.
-4. Si Safari/iOS eliminó `localStorage` pero IndexedDB sigue disponible, RosterHome restaura automáticamente el estado durable.
-5. Los cambios se escriben en IndexedDB de forma diferida y se fuerzan al ocultar/cerrar la app.
+### Configuración FTL por perfil
+En la pestaña FTL se configura el rol (flight/cabin), Home/Operating Base y, para cabin crew, cuántos minutos reporta antes que flight crew. OM-A 7.1.7.3 establece que el valor de la tabla se obtiene con el report de flight crew, mientras el FDP de cabin empieza en su propio report; RosterHome añade esa diferencia (máximo 60 min) al límite efectivo de duración de cabin crew.
 
-La app sigue siendo local: ningún roster se envía a un servidor.
+### Persistencia
+La configuración FTL se guarda dentro del mismo estado persistente de RosterHome. No es necesario volver a importar los rosters al actualizar desde v0.3.2.3.
 
-## Copia de seguridad
+### Archivos
+`index.html`, `styles.css`, `app.js`, `enhancements.js`, `storage.js`, `roster-parser.js`, `ftl.js`, `service-worker.js`, `manifest.webmanifest`.
 
-En **Reglas → Datos y persistencia** se muestran:
-- si hay roster guardado;
-- si Safari/iOS ha concedido almacenamiento persistente;
-- el último guardado.
-
-También están disponibles:
-- **Exportar copia**: descarga un JSON con ambos rosters, reglas, configuración y estado de la app.
-- **Restaurar copia**: reemplaza el estado local por una copia previamente exportada.
-
-Aunque Safari conceda persistencia, se recomienda exportar una copia antes de borrar datos web, desinstalar la PWA o cambiar de dispositivo.
-
-## Migración desde v0.3.1
-
-No hace falta reimportar los rosters. Al abrir v0.3.2.3 por primera vez, el estado existente en `localStorage` se migra automáticamente a IndexedDB.
-
-## Actualización en GitHub
-
-Sustituye:
-- `index.html`
-- `app.js`
-- `enhancements.js`
-- `styles.css`
-- `service-worker.js`
-- `README.md`
-
-Añade el archivo nuevo:
-- `storage.js`
-
-No hace falta modificar `roster-parser.js` ni reimportar ningún roster.
-
-
-## Hotfix v0.3.2.3
-- El almacenamiento durable ya no puede bloquear el arranque.
-- IndexedDB tiene timeout y cae automáticamente a localStorage.
-- El service worker usa actualización network-first y una instalación no falla si un archivo tarda en publicarse en GitHub Pages.
-- Todos los assets llevan cache-busting 0.3.2.3 para evitar mezclar builds.
-## v0.3.2.3 — startup fix
-Auditoría completa del arranque. Se corrigió un error de inicialización: `STATE_SCHEMA_VERSION` debía existir antes de ejecutar `loadState()`. Ese fallo detenía `app.js` y dejaba la interfaz visible pero sin interacción. Se eliminó además el segundo handler delegado de navegación que se había añadido como workaround; vuelve a existir una sola ruta de eventos para las pestañas.
+> Herramienta de comprobación/planificación. El OM-A entregado está marcado como `Uncontrolled document`; para una decisión operacional prevalecen el manual controlado, el roster oficial y las instrucciones de Crew Planning/OCC.

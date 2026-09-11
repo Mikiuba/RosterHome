@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b1020" />
   <title>RosterHome</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=0.3.2.3" />
+  <link rel="stylesheet" href="styles.css?v=0.4.0" />
 </head>
 <body>
 <div class="app">
@@ -148,42 +148,45 @@
     <div class="card ftl-card">
       <div class="ftl-head">
         <div>
-          <div class="ftl-kicker">Flight Time Limitations</div>
+          <div class="ftl-kicker">Corendon Airlines Europe · OM-A Chapter 7</div>
           <h2>FTL</h2>
-          <p class="muted">Estructura preparada para analizar límites y legalidad del roster cuando carguemos vuestro esquema FTL.</p>
+          <p class="muted">Análisis independiente del roster frente al esquema FTL del OM-A. Cuando falta un dato necesario, RosterHome devuelve <b>INDETERMINATE</b> en lugar de asumir.</p>
         </div>
-        <span class="ftl-status">Motor FTL · no configurado</span>
+        <div id="ftlOverallStatus" class="ftl-status-live ind"><span class="ftl-badge ind">? INDETERMINATE</span></div>
       </div>
 
-      <div class="notice ftl-warning"><b>Importante:</b> esta versión no determina si un duty o un roster es legal. No usa todavía límites EASA ni OM-A de compañía para tomar decisiones operacionales.</div>
+      <div class="notice ftl-warning"><b>Uso:</b> herramienta de comprobación y planificación. El OM-A cargado está marcado como “Uncontrolled document”; para una decisión operacional prevalecen el roster oficial, el manual controlado y Crew Planning/OCC.</div>
 
       <div class="ftl-overview">
         <div class="ftl-metric"><span>Duties importados</span><b id="ftlDuties">0</b></div>
         <div class="ftl-metric"><span>Perfiles con roster</span><b id="ftlPeople">0/2</b></div>
-        <div class="ftl-metric"><span>Periodo visible</span><b id="ftlPeriod">—</b></div>
-        <div class="ftl-metric pending"><span>Resultado FTL</span><b>Pendiente</b></div>
+        <div class="ftl-metric"><span>Periodo cargado</span><b id="ftlPeriod">—</b></div>
+        <div class="ftl-metric"><span>Fuente</span><b>OM-A Ch.7</b></div>
       </div>
 
-      <div class="ftl-section">
-        <h3>Qué analizará esta pestaña</h3>
-        <div class="ftl-grid">
-          <article><b>FDP máximo</b><span>Comparación entre FDP programado/real y el máximo aplicable.</span></article>
-          <article><b>Descanso mínimo</b><span>Comprobación del descanso entre duties y recuperación requerida.</span></article>
-          <article><b>Límites acumulados</b><span>Horas de vuelo y duty en las ventanas temporales que definamos.</span></article>
-          <article><b>EARLY / LATE / NIGHT</b><span>Tratamiento de horarios disruptivos y secuencias consecutivas.</span></article>
-          <article><b>Aclimatación y WOCL</b><span>Aplicación de zona horaria, estado de aclimatación y ventana circadiana.</span></article>
-          <article><b>Standby / RES</b><span>Reglas específicas para reservas, standby y extensión del duty.</span></article>
+      <div class="ftl-profile-switch" role="group" aria-label="Perfil FTL">
+        <button type="button" class="active" data-ftl-profile="0">Miguel</button>
+        <button type="button" data-ftl-profile="1">Nicole</button>
+      </div>
+
+      <div class="ftl-config">
+        <div class="ftl-config-head"><div><b id="ftlProfileTitle">Perfil</b><span>Datos necesarios para aplicar reference time y la regla específica de cabin crew.</span></div><button type="button" class="btn primary" id="saveFtlSettings">Guardar FTL</button></div>
+        <div class="rulegrid ftl-rulegrid">
+          <div><label>Rol</label><select id="ftlRole"><option value="flight">Flight crew</option><option value="cabin">Cabin crew</option></select></div>
+          <div><label>Home / Operating Base (IATA)</label><input id="ftlHomeBase" maxlength="3" placeholder="HER"></div>
+          <div id="ftlCabinLeadWrap" hidden><label>Cabin report antes que flight crew (min)</label><input id="ftlCabinLead" type="number" min="0" max="60" value="0"><small>0 si reportan a la vez. OM-A 7.1.7.3: diferencia máxima 60 min.</small></div>
         </div>
       </div>
 
-      <div class="ftl-section">
-        <h3>Resultado futuro por duty</h3>
-        <div class="ftl-result-preview">
-          <div><span>Legalidad</span><b>—</b><small>Pendiente de reglas</small></div>
-          <div><span>Factor limitante</span><b>—</b><small>Pendiente de reglas</small></div>
-          <div><span>Margen restante</span><b>—</b><small>Pendiente de reglas</small></div>
-        </div>
+      <div class="ftl-subtabs" role="group" aria-label="Sección FTL">
+        <button type="button" class="active" data-ftl-section="duties">Duty</button>
+        <button type="button" data-ftl-section="sequence">Secuencia</button>
+        <button type="button" data-ftl-section="cumulative">Acumulados</button>
+        <button type="button" data-ftl-section="reference">Referencia</button>
       </div>
+
+      <div class="ftl-quick" id="ftlQuick"></div>
+      <div id="ftlBody" class="ftl-body"></div>
     </div>
   </section>
 
@@ -263,7 +266,7 @@
     <div class="card" style="margin-top:16px"><h3>⚖️ Carga del mes</h3><p class="muted">Comparación rápida para ver quién llega con más carga, noches o recoveries.</p><div id="workloadCompare" class="workload-compare"></div></div>
   </section>
 
-  <div class="footer">MVP local · RosterHome v0.3.2.3 · El módulo FTL está preparado pero todavía no calcula legalidad.</div>
+  <div class="footer">RosterHome v0.4.0 · FTL basado en OM-A Chapter 7 · análisis local y conservador</div>
 </div>
 
 <div id="eventModal" class="modal hidden" aria-hidden="true">
@@ -281,9 +284,10 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="storage.js?v=0.3.2.3"></script>
-<script src="roster-parser.js?v=0.3.2.3"></script>
-<script src="app.js?v=0.3.2.3"></script>
-<script src="enhancements.js?v=0.3.2.3"></script>
+<script src="storage.js?v=0.4.0"></script>
+<script src="roster-parser.js?v=0.4.0"></script>
+<script src="app.js?v=0.4.0"></script>
+<script src="enhancements.js?v=0.4.0"></script>
+<script src="ftl.js?v=0.4.0"></script>
 </body>
 </html>

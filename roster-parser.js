@@ -210,8 +210,20 @@
     const structures=starts.map((s,i)=>parseStructuralBlock(text,s,i+1<starts.length?starts[i+1].lineStart:Math.min(text.length,s.index+5000)));
     let duties=buildDuties(text,period,structures,timeBasis);
     const seenStatus=new Set();
-    const dayLineRe=new RegExp('(?:^|\\n)\\s*'+DAY_RE+'(\\d{2})\\s+(ROFF|OFF|RES|SBY|STBY|STAND-BY|STAND\\s+BY|VAC|ABS|SIM|TRG)\\b(?:\\s+([A-Z]{3}))?','gmi');
-    let m;while((m=dayLineRe.exec(text))){const date=isoDay(dateFromDay(period,Number(m[2])));let status=m[3].toUpperCase().replace(/\s+/g,'-');if(status==='STAND-BY'||status==='STBY'||status==='SBY')status='STBY';const k=date+'|'+status;if(seenStatus.has(k))continue;seenStatus.add(k);duties.push({kind:'status',date,status,base:m[4]||null,timeBasis});}
+    // Keep timing for STBY/RES/SIM/TRG so the FTL engine can evaluate standby,
+    // reserve and cumulative duty. Same-time RES (0000-0000) is interpreted as
+    // a 24 h reserve period; OFF/ROFF remain all-day status markers.
+    const dayLineRe=new RegExp('(?:^|\\n)[ \t]*'+DAY_RE+'(\\d{2})[ \t]+(ROFF|OFF|RES|SBY|STBY|STAND-BY|STAND[ \t]+BY|VAC|ABS|SIM|TRG|ERRP)\\b(?:[ \t]+([A-Z]{3}))?(?:[ \t]+!?([0-9]{4})[ \t]+!?([0-9]{4}))?','gmi');
+    let m;while((m=dayLineRe.exec(text))){
+      const dayDate=dateFromDay(period,Number(m[2])); const date=isoDay(dayDate); let status=m[3].toUpperCase().replace(/\s+/g,'-'); if(status==='STAND-BY'||status==='STBY'||status==='SBY')status='STBY';
+      const base=m[4]||null, startRaw=m[5]||null, endRaw=m[6]||null; const k=date+'|'+status; if(seenStatus.has(k))continue; seenStatus.add(k);
+      const item={kind:'status',date,status,base,timeBasis};
+      if(startRaw&&endRaw&&['STBY','RES','SIM','TRG','ERRP'].includes(status)){
+        const z=zoneFor(timeBasis,base)||'UTC'; let st=wallTimeToInstant(dayDate,startRaw,z), en=wallTimeToInstant(dayDate,endRaw,z); if(en<=st)en=wallTimeToInstant(plusDay(dayDate,1),endRaw,z);
+        item.statusStart=st.toISOString(); item.statusEnd=en.toISOString(); item.statusHours=(en-st)/3600000; item.sourceStatusStart=startRaw; item.sourceStatusEnd=endRaw;
+      }
+      duties.push(item);
+    }
     duties=dedupe(duties).sort((a,b)=>(a.checkIn||a.date).localeCompare(b.checkIn||b.date));const validation=validateDuties(duties,timeBasis);
     return {period,crew,duties,validation,timeBasis,rawLength:text.length};
   }
