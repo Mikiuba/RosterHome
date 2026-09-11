@@ -316,3 +316,45 @@ button.event.calendar-block.briefing,.timeline-event.briefing{background:var(--b
 @media(max-width:560px){
   .summary-stats .stat-button{min-height:96px}
 }
+
+
+/* =========================================================
+   v0.3.1 · recovery counts as shared at-home time
+   Recovery is an overlay, not a blocker for couple time.
+   ========================================================= */
+.timeline-event.couple{
+  z-index:1;
+  opacity:.58;
+  background:linear-gradient(135deg,rgba(214,63,114,.82),rgba(214,63,114,.58));
+  box-shadow:none;
+}
+.timeline-event:not(.couple){z-index:3}
+.timeline-event.recovery{
+  z-index:4;
+  background:repeating-linear-gradient(135deg,rgba(183,121,31,.94) 0 8px,rgba(183,121,31,.70) 8px 14px);
+  border:1px solid rgba(255,221,157,.48);
+  box-shadow:0 1px 4px rgba(0,0,0,.32);
+}
+.timeline-event.recovery.full{
+  background:repeating-linear-gradient(135deg,rgba(207,77,77,.94) 0 8px,rgba(207,77,77,.70) 8px 14px);
+  border-color:rgba(255,186,186,.5);
+}
+.timeline-person-divider{z-index:5}
+.timeline-now{z-index:6}
+button.event.calendar-block.recovery{
+  background:repeating-linear-gradient(135deg,var(--recovery-solid) 0 8px,#94631c 8px 14px);
+}
+button.event.calendar-block.recovery.full{
+  background:repeating-linear-gradient(135deg,var(--recovery-full-solid) 0 8px,#a53e3e 8px 14px);
+}
+.simple-status-overlay{
+  display:inline-flex;align-items:center;align-self:flex-start;margin-top:3px;padding:2px 6px;border-radius:999px;
+  background:rgba(255,205,105,.14);border:1px solid rgba(255,205,105,.22);color:#ffd57a;font-size:8.5px;font-weight:750;
+}
+.simple-recovery-overlay-note,.recovery-in-window{
+  display:flex;flex-direction:column;gap:3px;margin:10px 0;padding:10px 11px;border-radius:11px;
+  background:rgba(183,121,31,.11);border:1px dashed rgba(255,205,105,.32);
+}
+.simple-recovery-overlay-note b,.recovery-in-window b{font-size:12px;color:#ffd57a}
+.simple-recovery-overlay-note span,.recovery-in-window span{font-size:11px;line-height:1.35;color:var(--muted)}
+.recovery-couple-note{margin-top:10px}

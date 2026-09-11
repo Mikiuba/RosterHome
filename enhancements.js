@@ -1,4 +1,4 @@
-/* RosterHome v0.3 · lifestyle planning build */
+/* RosterHome v0.3.1 · briefing from first-flight departure + recovery overlay */
 (function(){
   // New per-person planning defaults. Existing users keep their saved values.
   if(state.rules.briefingLead0 == null) state.rules.briefingLead0=105;
@@ -44,7 +44,10 @@
     if(off2!==off) guess=new Date(Date.UTC(y,mo-1,d,h,m,0)-off2);
     return guess;
   }
-  function firstSectorDepartureInstant(d){
+  // The briefing is anchored to the FIRST FLIGHT'S OFF-BLOCK / CHOCKS-OUT time,
+  // never to CrewLink C/I. Example: flight 20:45Z with 105 min lead => briefing 19:00Z,
+  // even if the duty/report itself starts at 19:45Z.
+  function firstFlightDepartureInstant(d){
     const f=d?.flights?.[0];
     if(!f?.depTime || !d?.checkIn) return null;
     let dateKey=d.sourceCheckInDate || d.date || String(d.checkIn).slice(0,10);
@@ -59,6 +62,8 @@
     };
     let dep=build(); if(!dep) return null;
     const ci=new Date(d.checkIn); let guard=0;
+    // A first sector cannot depart before its own report. The loop only resolves a
+    // midnight/date ambiguity; it does NOT derive departure from the report time.
     while(dep<ci && guard<2){ dateKey=addDaysKey(dateKey,1); dep=build(); guard++; }
     return dep;
   }
@@ -66,9 +71,15 @@
     if(d?.kind!=='duty') return null;
     const lead=numericPersonRule('briefingLead',pi,0);
     if(lead<=0) return null;
-    const departure=firstSectorDepartureInstant(d);
+    const departure=firstFlightDepartureInstant(d);
     if(!departure) return null;
-    return {start:new Date(departure.getTime()-minMs(lead)),end:departure,lead,flight:d.flights?.[0]||null};
+    const start=new Date(departure.getTime()-minMs(lead));
+    const checkIn=new Date(d.checkIn);
+    // Visually the briefing/pre-flight block runs only until C/I when it starts
+    // before report, so it does not misleadingly sit on top of the whole duty.
+    // The briefing *time* itself is always `departure - lead`.
+    const end=checkIn>start ? checkIn : new Date(start.getTime()+minMs(1));
+    return {start,end,briefingAt:start,departure,checkIn,lead,flight:d.flights?.[0]||null,insideDuty:start>=checkIn};
   }
 
   // Sleep now includes each person's own preparation time before leaving home.
@@ -94,7 +105,7 @@
       if(d.kind==='duty'){
         events.push({kind:'duty',person:pi,start:new Date(d.checkIn),end:d.checkout?new Date(d.checkout):new Date(new Date(d.checkIn).getTime()+ms(8)),label:dutyLabel(d),raw:d});
         const b=briefingForDuty(d,pi);
-        if(b) events.push({kind:'briefing',person:pi,start:b.start,end:b.end,label:'Briefing',lead:b.lead,flight:b.flight,raw:d});
+        if(b) events.push({kind:'briefing',person:pi,start:b.start,end:b.end,label:'Briefing',lead:b.lead,flight:b.flight,departure:b.departure,briefingAt:b.briefingAt,checkIn:b.checkIn,insideDuty:b.insideDuty,raw:d});
         const s=sleepForDuty(d,pi);
         if(s){
           events.push({kind:'sleep',person:pi,start:s.start,end:s.end,label:`Sueño ${state.rules.sleepHours} h`,prep:s.prep,raw:d});
@@ -129,7 +140,9 @@
     // Until timed STBY/RES parsing is added, be conservative on these days.
     if(operationalStatusOnDay(key)) return [];
     const start=utcForLocalDayTime(key,'08:00'),end=utcForLocalDayTime(key,'23:00');
-    const busyKinds=new Set(['duty','sleep','recovery','briefing']);
+    const busyKinds=new Set(['duty','sleep','briefing']);
+    // Recovery means the person is available at home for couple-planning purposes.
+    // It remains a visible overlay, but it must not remove time from shared availability.
     const blocks=derived.filter(e=>busyKinds.has(e.kind)).map(e=>overlap(e,{start,end},start,end)).filter(Boolean);
     const merged=mergeIntervals(blocks),gaps=[]; let cursor=start;
     for(const b of merged){
@@ -144,16 +157,32 @@
     const gaps=sharedFreeIntervalsForDay(key,derived,120),result=gaps.sort((a,b)=>(b.end-b.start)-(a.end-a.start))[0]||null;
     cache.set(key,result); return result;
   };
+  function recoveryOverlaysForInterval(interval,derived){
+    if(!interval) return [];
+    return derived.filter(e=>e.kind==='recovery' && new Date(e.start)<new Date(interval.end) && new Date(e.end)>new Date(interval.start)).map(e=>{
+      const start=new Date(Math.max(+new Date(e.start),+new Date(interval.start)));
+      const end=new Date(Math.min(+new Date(e.end),+new Date(interval.end)));
+      return {...e,overlapStart:start,overlapEnd:end,overlapHours:(end-start)/3600000};
+    }).filter(e=>e.overlapHours>0);
+  }
+  function recoveryOverlayLabel(interval,derived){
+    const recs=recoveryOverlaysForInterval(interval,derived);
+    if(!recs.length) return '';
+    const names=[...new Set(recs.map(r=>state.people[r.person]?.name||`Perfil ${r.person+1}`))];
+    const hasFull=recs.some(r=>r.level==='full'),hasPartial=recs.some(r=>r.level==='partial');
+    const type=hasFull&&hasPartial?'recovery parcial/completo':hasFull?'recovery completo':'recovery parcial';
+    return `Incluye ${type} de ${names.join(' y ')}`;
+  }
   function dayPlanStatus(key,derived){
     let cache=dayStatusCache.get(derived); if(!cache){cache=new Map();dayStatusCache.set(derived,cache);} if(cache.has(key))return cache.get(key);
     let result;
     if(!state.people[0].duties.length || !state.people[1].duties.length) result={level:'unknown',label:'Falta un roster',emoji:'＋',detail:'Importa los dos rosters para comparar el día.',best:null,totalHours:0};
     else{
       const gaps=sharedFreeIntervalsForDay(key,derived,30),sorted=[...gaps].sort((a,b)=>(b.end-b.start)-(a.end-a.start)),best=sorted[0]||null;
-      const bestH=best?(best.end-best.start)/3600000:0,totalHours=gaps.reduce((sum,g)=>sum+(g.end-g.start)/3600000,0);
-      if(bestH>=6) result={level:'together',label:'Día para pasar juntos',emoji:'❤️',detail:`Mejor ventana ${timeLocal(best.start)}–${timeLocal(best.end)}`,best,totalHours};
-      else if(bestH>=2) result={level:'partial',label:'Coincidimos un rato',emoji:'🫶',detail:`Mejor ventana ${timeLocal(best.start)}–${timeLocal(best.end)}`,best,totalHours};
-      else result={level:'busy',label:'Día ocupado',emoji:'🔒',detail:operationalStatusOnDay(key)?'Hay standby/reserva u otra actividad que condiciona el día.':'No aparece una ventana continua de 2 h para los dos.',best,totalHours};
+      const bestH=best?(best.end-best.start)/3600000:0,totalHours=gaps.reduce((sum,g)=>sum+(g.end-g.start)/3600000,0),recoveryOverlays=best?recoveryOverlaysForInterval(best,derived):[];
+      if(bestH>=6) result={level:'together',label:'Día para pasar juntos',emoji:'❤️',detail:`Mejor ventana ${timeLocal(best.start)}–${timeLocal(best.end)}`,best,totalHours,recoveryOverlays};
+      else if(bestH>=2) result={level:'partial',label:'Coincidimos un rato',emoji:'🫶',detail:`Mejor ventana ${timeLocal(best.start)}–${timeLocal(best.end)}`,best,totalHours,recoveryOverlays};
+      else result={level:'busy',label:'Día ocupado',emoji:'🔒',detail:operationalStatusOnDay(key)?'Hay standby/reserva u otra actividad que condiciona el día.':'No aparece una ventana continua de 2 h para los dos.',best,totalHours,recoveryOverlays:[]};
     }
     cache.set(key,result); return result;
   }
@@ -162,7 +191,9 @@
     let result=null;
     if(state.people[0].duties.length && state.people[1].duties.length && !operationalStatusOnDay(key)){
       const center=utcForLocalDayTime(key,time),flex=minMs(state.rules.mealFlex),start=new Date(center.getTime()-flex),end=new Date(center.getTime()+flex);
-      const busyKinds=new Set(['duty','sleep','recovery','briefing']);
+      const busyKinds=new Set(['duty','sleep','briefing']);
+      // A recovery block does not make lunch/dinner incompatible by itself: the
+      // person is at home, although recovery still has priority and stays visible.
       const blocks=mergeIntervals(derived.filter(e=>busyKinds.has(e.kind)).map(e=>overlap(e,{start,end},start,end)).filter(Boolean));
       let cursor=start;
       for(const b of blocks){
@@ -180,7 +211,7 @@
     const out=[];
     state.people.forEach((p,pi)=>p.duties.filter(x=>x.kind==='status'&&x.date===key).forEach(x=>out.push({kind:'status',person:pi,label:x.status,raw:x,date:key})));
     derived.filter(e=>eventOverlapsDay(e,key)&&(includeQuiet||e.kind!=='quiet')).forEach(e=>out.push(e));
-    const cw=coupleWindowForDay(key,derived); if(cw)out.push({kind:'couple',person:null,start:cw.start,end:cw.end,label:'Ventana juntos',date:key});
+    const cw=coupleWindowForDay(key,derived); if(cw)out.push({kind:'couple',person:null,start:cw.start,end:cw.end,label:'Ventana juntos',date:key,recoveryOverlays:recoveryOverlaysForInterval(cw,derived)});
     const order={status:0,quiet:1,sleep:2,briefing:3,duty:4,recovery:5,couple:6};
     out.sort((a,b)=>{const ta=a.start?+new Date(a.start):-Infinity,tb=b.start?+new Date(b.start):-Infinity;return ta!==tb?ta-tb:(order[a.kind]??9)-(order[b.kind]??9);});
     cache.set(ck,out); return out;
@@ -194,10 +225,10 @@
     const p=state.people[e.person].name,initial=p.trim().charAt(0).toUpperCase();
     return compact?`🗂 ${initial}`:`🗂 Briefing · ${p}`;
   };
-  eventBlockMeta=function(e){ return e.kind==='briefing'?`${eventTimeRange(e)} · ${e.lead} min antes`:baseEventBlockMeta(e); };
+  eventBlockMeta=function(e){ return e.kind==='briefing'?`${timeLocal(e.briefingAt||e.start)} · vuelo ${timeLocal(e.departure)} · −${e.lead} min`:baseEventBlockMeta(e); };
   eventTitle=function(e){ return e.kind==='briefing'?`🗂 Briefing · ${state.people[e.person].name}`:baseEventTitle(e); };
   eventSubtitle=function(e){
-    if(e.kind==='briefing') return `${e.lead} min antes del primer sector`;
+    if(e.kind==='briefing') return `${e.lead} min antes de chocks del primer vuelo`;
     if(e.kind==='sleep'){
       const prep=numericPersonRule('prepMinutes',e.person,0);
       return e.sleepConflict?'Coincide realmente con un duty · revisar roster':`${state.rules.sleepHours} h · ${prep} min de preparación personal`;
@@ -208,11 +239,20 @@
   eventDetailHtml=function(e){
     if(e.kind==='briefing'){
       const f=e.flight||{},sector=f.dep&&f.arr?`${f.dep} → ${f.arr}`:(e.raw?.route||'Primer sector');
-      return `<div class="detail-section detail-summary"><h3>En pocas palabras</h3>${detailRow('Persona',state.people[e.person].name)}${detailRow('Sector',sector)}${detailRow('Desde',localDateTime(e.start))}${detailRow('Hasta',localDateTime(e.end))}${detailRow('Antelación configurada',`${e.lead} min`)}</div><p class="detail-note">Bloque personal de RosterHome. No sustituye el C/I ni define el briefing operacional de compañía.</p>`;
+      const sourceBasis=e.raw?.timeBasis==='utc'?'UTC':'hora local del aeropuerto';
+      const warning=e.insideDuty?`<div class="warning-box"><b>⚠️ Briefing posterior al C/I</b><br>Con esta antelación, la hora calculada de briefing cae dentro del duty. Revisa el valor configurado si no es lo que buscas.</div>`:'';
+      return `${warning}<div class="detail-section detail-summary"><h3>En pocas palabras</h3>${detailRow('Persona',state.people[e.person].name)}${detailRow('Sector',sector)}${detailRow('Hora de briefing',localDateTime(e.briefingAt||e.start))}${detailRow('Salida primer vuelo (chocks)',localDateTime(e.departure))}${detailRow('C/I CrewLink',localDateTime(e.checkIn||e.raw?.checkIn))}${detailRow('Antelación configurada',`${e.lead} min`)}${detailRow('Base horaria del roster',sourceBasis)}</div><p class="detail-note">La hora de briefing se calcula siempre desde la salida del primer vuelo: <b>chocks − antelación configurada</b>. No se calcula desde el C/I.</p>`;
     }
     if(e.kind==='sleep'){
       const report=e.raw?.checkIn?localDateTime(e.raw.checkIn):'—',prep=numericPersonRule('prepMinutes',e.person,0),warning=e.sleepConflict?`<div class="warning-box"><b>⚠️ Conflicto real detectado</b><br>Este bloque de sueño se solapa temporalmente con ${esc((e.conflictDuties||[]).join(', ')||'un duty')}. Revisa la importación o las reglas.</div>`:'';
       return `${warning}<div class="detail-section"><h3>Qué indica</h3><p class="detail-explainer">Sueño protegido calculado hacia atrás desde la primera obligación previa al vuelo (briefing o salida hacia el report) y vuestro tiempo personal de preparación.</p>${detailRow('Persona',state.people[e.person].name)}${detailRow('Desde',localDateTime(e.start))}${detailRow('Despertar objetivo',localDateTime(e.end))}${detailRow('Sueño objetivo',`${state.rules.sleepHours} h`)}${detailRow('Preparación personal',`${prep} min`)}${detailRow('Trayecto a report',`${state.rules.commuteOut} min`)}${detailRow('Report relacionado',report)}${detailRow('Ruta relacionada',e.raw?.route||'Duty')}</div>`;
+    }
+    if(e.kind==='recovery'){
+      return `${baseEventDetailHtml(e)}<div class="detail-section recovery-couple-note"><h3>❤️ Convivencia</h3><p class="detail-explainer">Este recovery <b>sí cuenta como tiempo potencial en casa juntos</b> si la otra persona también está disponible. Se muestra como una capa superpuesta porque estar juntos no elimina la necesidad de recovery.</p></div>`;
+    }
+    if(e.kind==='couple'){
+      const recs=e.recoveryOverlays||recoveryOverlaysForInterval(e,allDerived()),note=recs.length?`<div class="recovery-in-window"><b>↗ Esta ventana incluye recovery</b><span>${esc(recoveryOverlayLabel(e,allDerived()))}. El tiempo sigue contando como coincidencia en casa, pero el recovery mantiene prioridad.</span></div>`:'';
+      return `<div class="detail-section"><h3>Qué indica</h3><p class="detail-explainer">Es la mejor ventana continua del día, entre 08:00 y 23:00, en la que ninguno está bloqueado por duty, briefing o sueño protegido. <b>Recovery parcial y completo cuentan como tiempo potencial juntos.</b></p>${detailRow('Desde',localDateTime(e.start))}${detailRow('Hasta',localDateTime(e.end))}${detailRow('Tiempo potencial',`${((e.end-e.start)/3600000).toFixed(1)} h`)}</div>${note}`;
     }
     return baseEventDetailHtml(e);
   };
@@ -222,8 +262,8 @@
     const hint=$('clarityHint'); if(hint)hint.textContent=state.calendarDensity==='simple'?'Un único resultado compartido por día':'Duty, briefing, sueño, recovery y demás detalle';
   };
   function simpleStatusHtml(key,derived,context='month'){
-    const s=dayPlanStatus(key,derived),time=s.best?`${timeLocal(s.best.start)}–${timeLocal(s.best.end)}`:'';
-    return `<button type="button" class="simple-day-status ${s.level} ${context}" data-open-day="${key}"><span class="simple-status-main">${s.emoji} ${esc(s.label)}</span>${time?`<span class="simple-status-time">${esc(time)}</span>`:''}</button>`;
+    const s=dayPlanStatus(key,derived),time=s.best?`${timeLocal(s.best.start)}–${timeLocal(s.best.end)}`:'',hasRecovery=!!s.recoveryOverlays?.length;
+    return `<button type="button" class="simple-day-status ${s.level} ${context}" data-open-day="${key}"><span class="simple-status-main">${s.emoji} ${esc(s.label)}</span>${time?`<span class="simple-status-time">${esc(time)}</span>`:''}${hasRecovery?'<span class="simple-status-overlay">+ recovery</span>':''}</button>`;
   }
 
   renderMonthCalendar=function(derived){
@@ -262,14 +302,15 @@
     $('calendar').innerHTML=html+'</div>';
   };
   const baseSegmentBlockMeta=segmentBlockMeta;
-  segmentBlockMeta=function(seg){ return seg.e.kind==='briefing'?`${segmentTimeRange(seg)} · ${seg.e.lead} min`:baseSegmentBlockMeta(seg); };
+  segmentBlockMeta=function(seg){ return seg.e.kind==='briefing'?`${timeLocal(seg.e.briefingAt||seg.e.start)} · vuelo ${timeLocal(seg.e.departure)}`:baseSegmentBlockMeta(seg); };
   renderDayCalendar=function(derived){
     const key=state.focusDate,todayKey=dayKey(new Date());$('monthTitle').textContent=localDayLabel(key,{weekday:'long',day:'numeric',month:'long',year:'numeric'});$('calendar').className='calendar day-view split-people';
     if(state.calendarDensity==='simple'){
       const s=dayPlanStatus(key,derived),lunch=mealWindowForDay(key,state.rules.lunchTime,derived),dinner=mealWindowForDay(key,state.rules.dinnerTime,derived);
       let html=`<div class="simple-day-card ${s.level} ${key===todayKey?'today':''}"><div class="simple-day-icon">${s.emoji}</div><h2>${esc(s.label)}</h2><p>${esc(s.detail)}</p>`;
       if(s.best)html+=`<div class="simple-day-window"><span>Mejor momento juntos</span><b>${timeLocal(s.best.start)}–${timeLocal(s.best.end)}</b></div>`;
-      html+=`<div class="simple-day-window"><span>Comida</span><b>${lunch?`Posible · ${timeLocal(lunch.start)}–${timeLocal(lunch.end)}`:'Difícil en el horario preferido'}</b></div><div class="simple-day-window"><span>Cena</span><b>${dinner?`Posible · ${timeLocal(dinner.start)}–${timeLocal(dinner.end)}`:'Difícil en el horario preferido'}</b></div><p class="simple-switch-note">Cambia a <b>Completo</b> para ver duties, briefings, sueño y recovery.</p></div>`;
+      if(s.best&&s.recoveryOverlays?.length)html+=`<div class="simple-recovery-overlay-note"><b>🟡 También toca recovery</b><span>${esc(recoveryOverlayLabel(s.best,derived))}. Cuenta como tiempo juntos en casa, pero conviene mantener el día tranquilo.</span></div>`;
+      html+=`<div class="simple-day-window"><span>Comida</span><b>${lunch?`Posible · ${timeLocal(lunch.start)}–${timeLocal(lunch.end)}`:'Difícil en el horario preferido'}</b></div><div class="simple-day-window"><span>Cena</span><b>${dinner?`Posible · ${timeLocal(dinner.start)}–${timeLocal(dinner.end)}`:'Difícil en el horario preferido'}</b></div><p class="simple-switch-note">Cambia a <b>Completo</b> para ver duties, briefings, sueño y recovery en capas separadas.</p></div>`;
       $('calendar').innerHTML=html;return;
     }
     const ev=eventsForDay(key,derived,true),allDay=ev.filter(e=>e.kind==='status'),rawSegments=ev.filter(e=>e.kind!=='status'&&e.start&&e.end).map(e=>timelineSegment(e,key)).filter(Boolean),segments=assignPersonTimelineLanes(rawSegments),H=64,dayHeight=24*H;
@@ -296,7 +337,7 @@
       {id:'togetherDays',label:'❤️ Días para pasar juntos',value:togetherDays.length,items:togetherDays.map(x=>({key:x.key,text:x.status.detail}))},
       {id:'partialDays',label:'🫶 Coincidimos un rato',value:partialDays.length,items:partialDays.map(x=>({key:x.key,text:x.status.detail}))},
       {id:'busyDays',label:'🔒 Días ocupados',value:busyDays.length,items:busyDays.map(x=>({key:x.key,text:x.status.detail}))},
-      {id:'togetherHours',label:'🕒 Horas potenciales juntos',value:`${Math.round(togetherHours)} h`,items:dayRows.filter(x=>x.status.totalHours>0).sort((a,b)=>b.status.totalHours-a.status.totalHours).map(x=>({key:x.key,text:`${x.status.totalHours.toFixed(1)} h potenciales entre 08:00 y 23:00`}))},
+      {id:'togetherHours',label:'🕒 Horas potenciales juntos',value:`${Math.round(togetherHours)} h`,items:dayRows.filter(x=>x.status.totalHours>0).sort((a,b)=>b.status.totalHours-a.status.totalHours).map(x=>({key:x.key,text:`${x.status.totalHours.toFixed(1)} h potenciales entre 08:00 y 23:00${x.status.best&&x.status.recoveryOverlays?.length?' · incluye recovery':''}`}))},
       {id:'lunchDays',label:'🥗 Comidas compatibles',value:lunchDays.length,items:lunchDays.map(x=>({key:x.key,text:`Comida posible ${timeLocal(x.lunch.start)}–${timeLocal(x.lunch.end)}`}))},
       {id:'dinnerDays',label:'🍽️ Cenas compatibles',value:dinnerDays.length,items:dinnerDays.map(x=>({key:x.key,text:`Cena posible ${timeLocal(x.dinner.start)}–${timeLocal(x.dinner.end)}`}))},
       {id:'bothWorkDays',label:'✈️ Días trabajando los dos',value:bothWorkDays.length,items:bothWorkDays.map(x=>({key:x.key,text:'Ambos tienen duty en algún momento del día.'}))}
@@ -319,7 +360,7 @@
     $('stats').innerHTML=model.metrics.map(m=>`<button type="button" class="stat stat-button ${m.id===selectedSummaryMetric?'active':''}" data-summary-metric="${m.id}"><span class="muted">${esc(m.label)}</span><b>${esc(m.value)}</b><small>Toca para ver los días</small></button>`).join('');
     renderSummaryDetail(model);
     const windows=model.dayRows.filter(x=>x.status.best).sort((a,b)=>(b.status.best.end-b.status.best.start)-(a.status.best.end-a.status.best.start));
-    $('bestWindows').innerHTML=windows.slice(0,8).map(x=>`<button type="button" class="summary-row summary-row-button" data-summary-day="${x.key}"><span>${esc(localDayLabel(x.key,{weekday:'short',day:'numeric',month:'short'}))}</span><b>${timeLocal(x.status.best.start)}–${timeLocal(x.status.best.end)} · ${((x.status.best.end-x.status.best.start)/3600000).toFixed(1)} h</b></button>`).join('')||'<div class="muted">Importa ambos rosters para calcularlo.</div>';
+    $('bestWindows').innerHTML=windows.slice(0,8).map(x=>`<button type="button" class="summary-row summary-row-button" data-summary-day="${x.key}"><span>${esc(localDayLabel(x.key,{weekday:'short',day:'numeric',month:'short'}))}</span><b>${timeLocal(x.status.best.start)}–${timeLocal(x.status.best.end)} · ${((x.status.best.end-x.status.best.start)/3600000).toFixed(1)} h${x.status.recoveryOverlays?.length?' · 🟡 recovery':''}</b></button>`).join('')||'<div class="muted">Importa ambos rosters para calcularlo.</div>';
     const issues=[];
     derived.filter(e=>e.kind==='recovery'&&dayKey(e.start).startsWith(state.month)).forEach(e=>issues.push({date:dayKey(e.start),txt:`${state.people[e.person].name}: ${e.level==='full'?'recovery completo':'recovery parcial'}`}));
     derived.filter(e=>e.kind==='sleep'&&e.sleepConflict&&dayKey(e.start).startsWith(state.month)).forEach(e=>issues.push({date:dayKey(e.start),txt:`${state.people[e.person].name}: conflicto entre sueño y duty`}));

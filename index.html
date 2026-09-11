@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b1020" />
   <title>RosterHome</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=0.3b" />
+  <link rel="stylesheet" href="styles.css?v=0.3.1b" />
 </head>
 <body>
 <div class="app">
@@ -56,10 +56,10 @@
               <div class="legend-item"><span class="legend-swatch p2"></span><div><b><span id="legendGuideP2">Perfil 2</span> · Duty / roster</b><small>Actividad del segundo perfil.</small></div></div>
               <div class="legend-item"><span class="legend-swatch sleep"></span><div><b>Sueño protegido</b><small>Ventana calculada hacia atrás desde el report para reservar las horas de sueño configuradas.</small></div></div>
               <div class="legend-item"><span class="legend-swatch quiet"></span><div><b>Quiet hours</b><small>Periodo previo al sueño protegido en el que conviene reducir ruido, luces, llamadas y actividad doméstica.</small></div></div>
-              <div class="legend-item"><span class="legend-swatch recovery"></span><div><b>Recovery parcial</b><small>Bloque de recuperación doméstica generado por las reglas de RosterHome tras un duty exigente.</small></div></div>
-              <div class="legend-item"><span class="legend-swatch full"></span><div><b>Recovery completo</b><small>Recuperación doméstica de mayor duración. No equivale a un descanso mínimo FTL.</small></div></div>
-              <div class="legend-item"><span class="legend-swatch couple"></span><div><b>Ventana juntos</b><small>Periodo potencial en el que ninguno está bloqueado por duty o sueño protegido.</small></div></div>
-              <div class="legend-item"><span class="legend-swatch briefing"></span><div><b>Briefing</b><small>Bloque personal antes del primer sector. La antelación se configura por persona.</small></div></div>
+              <div class="legend-item"><span class="legend-swatch recovery"></span><div><b>Recovery parcial</b><small>Bloque de recuperación doméstica tras un duty exigente. Cuenta como tiempo potencial juntos en casa, pero se muestra superpuesto para recordar que toca recovery.</small></div></div>
+              <div class="legend-item"><span class="legend-swatch full"></span><div><b>Recovery completo</b><small>Recuperación doméstica de mayor duración. También cuenta como tiempo potencial juntos en casa y se mantiene como capa visible. No equivale a un descanso mínimo FTL.</small></div></div>
+              <div class="legend-item"><span class="legend-swatch couple"></span><div><b>Ventana juntos</b><small>Periodo potencial en el que ninguno está bloqueado por duty, briefing o sueño protegido. Puede incluir recovery parcial o completo, que aparece como una capa superpuesta.</small></div></div>
+              <div class="legend-item"><span class="legend-swatch briefing"></span><div><b>Briefing</b><small>Hora calculada desde la salida (chocks) del primer vuelo, no desde el C/I. La antelación se configura por persona.</small></div></div>
               <div class="legend-item"><span class="legend-swatch simple-together"></span><div><b>Día para pasar juntos</b><small>En vista Simple hay al menos 6 h continuas potenciales para los dos.</small></div></div>
               <div class="legend-item"><span class="legend-swatch simple-busy"></span><div><b>Día ocupado</b><small>No aparece una ventana continua de 2 h para ambos entre 08:00 y 23:00.</small></div></div>
             </div>
@@ -204,15 +204,15 @@
         <div class="personal-rule-card p1-rule">
           <h3 id="rulesName0">👨‍✈️ Miguel</h3>
           <label>Prepararse y vestirse antes de salir (min)</label><input id="prepMinutes0" type="number" min="0" max="180" value="20">
-          <label>Briefing antes del primer vuelo (min)</label><input id="briefingLead0" type="number" min="0" max="240" value="105">
+          <label>Briefing antes de chocks del primer vuelo (min)</label><input id="briefingLead0" type="number" min="0" max="240" value="105">
         </div>
         <div class="personal-rule-card p2-rule">
           <h3 id="rulesName1">👩‍✈️ Nicole</h3>
           <label>Prepararse y vestirse antes de salir (min)</label><input id="prepMinutes1" type="number" min="0" max="180" value="40">
-          <label>Briefing antes del primer vuelo (min)</label><input id="briefingLead1" type="number" min="0" max="240" value="105">
+          <label>Briefing antes de chocks del primer vuelo (min)</label><input id="briefingLead1" type="number" min="0" max="240" value="105">
         </div>
       </div>
-      <p class="rules-help muted">El sueño protegido se ajusta al compromiso más temprano antes del vuelo (briefing o salida hacia el report), además del tiempo personal de preparación de cada uno. El briefing es un bloque personal y no sustituye el C/I de CrewLink.</p>
+      <p class="rules-help muted">El briefing se calcula como <b>hora de salida (chocks) del primer vuelo − X minutos</b>; nunca desde el inicio del duty/C/I. El sueño protegido se ajusta a ese briefing o, si fuese anterior, a la salida hacia el report, además del tiempo personal de preparación de cada uno.</p>
 
       <h3 class="rules-subtitle">Recovery y horarios de casa</h3>
       <div class="rulegrid">
@@ -245,7 +245,7 @@
     <div class="card" style="margin-top:16px"><h3>⚖️ Carga del mes</h3><p class="muted">Comparación rápida para ver quién llega con más carga, noches o recoveries.</p><div id="workloadCompare" class="workload-compare"></div></div>
   </section>
 
-  <div class="footer">MVP local · RosterHome v0.3 · El módulo FTL está preparado pero todavía no calcula legalidad.</div>
+  <div class="footer">MVP local · RosterHome v0.3.1 · El módulo FTL está preparado pero todavía no calcula legalidad.</div>
 </div>
 
 <div id="eventModal" class="modal hidden" aria-hidden="true">
@@ -263,8 +263,8 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="roster-parser.js?v=0.3b"></script>
-<script src="app.js?v=0.3b"></script>
-<script src="enhancements.js?v=0.3b"></script>
+<script src="roster-parser.js?v=0.3.1b"></script>
+<script src="app.js?v=0.3.1b"></script>
+<script src="enhancements.js?v=0.3.1b"></script>
 </body>
 </html>
