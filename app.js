@@ -679,6 +679,20 @@ function ftlCivilAt(instant,timeZone){
   const o=Object.fromEntries(parts.map(p=>[p.type,p.value]));
   return `${o.year}-${o.month}-${o.day}T${o.hour}:${o.minute}:${o.second}`;
 }
+function ftlSourceCivil(d,which,timeZone){
+  const isStart=which==='start';
+  const sourceDate=isStart?d?.sourceCheckInDate:d?.sourceCheckOutDate;
+  const sourceTime=isStart?d?.sourceCheckInTime:d?.sourceCheckOutTime;
+  // A CrewLink "Local times at event airport" export already gives us the
+  // regulatory wall-clock value. Re-formatting an old persisted value as an
+  // instant can apply the airport offset a second time (03:00 HAJ -> 05:00),
+  // which falsely turns a NIGHT duty into EARLY.
+  if(d?.timeBasis==='local_event'&&sourceDate&&sourceTime){
+    const hhmm=String(sourceTime).replace(/\D/g,'').slice(0,4).padStart(4,'0');
+    return `${sourceDate}T${hhmm.slice(0,2)}:${hhmm.slice(2,4)}:00`;
+  }
+  return ftlCivilAt(isStart?d?.checkIn:d?.checkout,timeZone);
+}
 function ftlProfileBase(duties){
   const counts=new Map();
   duties.forEach(d=>{const b=String(d.base||'').toUpperCase();if(b)counts.set(b,(counts.get(b)||0)+1);});
@@ -730,7 +744,7 @@ function renderFtl(){
     const coverageStartMs=coverageDates.length?new Date(`${coverageDates[0]}T00:00:00Z`).getTime():new Date(ds[0].checkIn).getTime();
     let rows='';
     ds.forEach((d,i)=>{
-      const tz=ftlReferenceZone(d,base),civilStart=ftlCivilAt(d.checkIn,tz),civilEnd=ftlCivilAt(d.checkout,tz);
+      const tz=ftlReferenceZone(d,base),civilStart=ftlSourceCivil(d,'start',tz),civilEnd=ftlSourceCivil(d,'end',tz);
       const flags=engine.classifyDisruptiveDuty(civilStart,civilEnd),sectors=Math.max(1,d.flights?.length||1);
       const actualFdp=ftlMinutes(d.fdp)??ftlMinutes(d.fdt),basicMax=engine.table2MaxForCivil(civilStart,sectors),crewMax=ftlMinutes(d.max);
       const xfdp=ftlMinutes(d.xfdp);
@@ -760,8 +774,8 @@ function renderFtl(){
 
         if(home){
           const transition=engine.validateDisruptiveTransition(
-            {start:ftlCivilAt(prev.checkIn,baseTz),end:ftlCivilAt(prev.checkout,baseTz)},
-            {start:ftlCivilAt(d.checkIn,baseTz),end:ftlCivilAt(d.checkout,baseTz)},
+            {start:ftlSourceCivil(prev,'start',baseTz),end:ftlSourceCivil(prev,'end',baseTz)},
+            {start:ftlSourceCivil(d,'start',baseTz),end:ftlSourceCivil(d,'end',baseTz)},
             {atHomeOrOperatingBase:true}
           );
           if(transition.requiresLocalNight){
@@ -784,7 +798,7 @@ function renderFtl(){
 
       if(status==='bad')badCount++;else if(status==='review')reviewCount++;else okCount++;
       const date=String(d.date||d.checkIn).slice(0,10),route=d.route||d.base||'Duty';
-      const report=ftlCivilAt(d.checkIn,tz).slice(11,16),co=ftlCivilAt(d.checkout,tz).slice(11,16);
+      const report=civilStart.slice(11,16),co=civilEnd.slice(11,16);
       rows+=`<details class="ftl-duty-row"><summary><div class="ftl-duty-main"><b>${esc(date.slice(8,10)+'/'+date.slice(5,7))} · ${esc(report)}–${esc(co)}</b><small>${esc(ftlTypeLabel(flags))}</small></div><div class="ftl-duty-route"><b>${esc(route)}</b><small>FDP ${esc(ftlFormatMinutes(actualFdp))} · max ${esc(ftlFormatMinutes(basicMax))}</small></div><span class="ftl-badge ${status}">${ftlStatusWord(status)}</span></summary><div class="ftl-duty-body">${checks.map(c=>ftlCheck(c[0],c[1],c[2])).join('')}<div class="ftl-note">Base inferida del perfil: ${esc(base||'—')}. Las ventanas acumuladas solo se declaran completas cuando el roster importado contiene todo el periodo necesario.</div></div></details>`;
     });
     peopleHtml.push(`<section class="ftl-person-block"><div class="ftl-person-title"><b>${esc(person.name||`Perfil ${pi+1}`)}</b><span>Base inferida: ${esc(base||'—')}</span></div>${rows}</section>`);
@@ -975,4 +989,4 @@ on(document,'keydown',e=>{if(e.key==='Escape'&&$('eventModal')&&!$('eventModal')
 // Navigation is bound once above. Keep a single source of truth for taps.
 try{syncInputs();}catch(err){console.error('[RosterHome] No se pudieron sincronizar inputs',err);}
 try{renderCalendar();}catch(err){console.error('[RosterHome] Render inicial en fallback',err);}
-if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./service-worker.js?v=0.3.3').catch(()=>{});
+if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./service-worker.js?v=0.3.4').catch(()=>{});

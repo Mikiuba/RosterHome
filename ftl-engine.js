@@ -1,6 +1,6 @@
 /*
  * RosterHome FTL engine — Corendon Airlines Europe OM-A Ch. 7 core rules.
- * Version 0.3.3
+ * Version 0.3.4
  *
  * Implemented here:
  * - Disruptive schedules (EARLY TYPE): EARLY 05:00-05:59, LATE 23:00-01:59,
