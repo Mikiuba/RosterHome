@@ -1,4 +1,4 @@
-/* RosterHome v0.3.2.2 · briefing/recovery + resilient persistence */
+/* RosterHome v0.3.2.3 · briefing/recovery + resilient persistence */
 (function(){
   // New per-person planning defaults. Existing users keep their saved values.
   if(state.rules.briefingLead0 == null) state.rules.briefingLead0=105;

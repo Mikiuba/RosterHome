@@ -17,12 +17,12 @@ const DEFAULT_STATE = {
 let BOOT_LOCAL_RAW=null;
 try{BOOT_LOCAL_RAW=localStorage.getItem('rosterhome-state');}catch(_){ }
 const BOOT_HAD_LOCAL_STATE = !!BOOT_LOCAL_RAW;
+const STATE_SCHEMA_VERSION = 6;
 let durableStorageReady = false;
 let state = loadState();
 let renderedEvents = new Map();
 let eventCounter = 0;
 let calendarRenderFrame = 0;
-const STATE_SCHEMA_VERSION = 6;
 
 function dutyIdentity(d){
   if(!d) return '';
@@ -820,7 +820,7 @@ function exportIcs(){
   const blob=new Blob([ics],{type:'text/calendar;charset=utf-8'}); const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`RosterHome-${state.month}.ics`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
 
-// UI wiring — v0.3.2.2 resilient binding
+// UI wiring — v0.3.2.3 validated binding
 function on(el,event,handler,options){
   if(el && typeof el.addEventListener==='function') el.addEventListener(event,handler,options);
 }
@@ -852,16 +852,7 @@ on($('calendar'),'click',e=>{try{const eventBtn=e.target.closest('[data-event-id
 document.querySelectorAll('[data-close-modal]').forEach(x=>on(x,'click',closeEventDetails));
 on(document,'keydown',e=>{if(e.key==='Escape'&&$('eventModal')&&!$('eventModal').classList.contains('hidden'))closeEventDetails();});
 
-// Independent delegated navigation fallback. Even if a feature module throws,
-// the shell tabs must remain tappable on iOS.
-on(document,'click',e=>{
-  const tab=e.target.closest?.('.tab[data-view]');
-  if(tab){
-    document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===tab));
-    document.querySelectorAll('.view').forEach(x=>x.classList.toggle('active',x.id===tab.dataset.view));
-  }
-});
-
+// Navigation is bound once above. Keep a single source of truth for taps.
 try{syncInputs();}catch(err){console.error('[RosterHome] No se pudieron sincronizar inputs',err);}
 try{renderCalendar();}catch(err){console.error('[RosterHome] Render inicial en fallback',err);}
-if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./service-worker.js?v=0.3.2.2').catch(()=>{});
+if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./service-worker.js?v=0.3.2.3').catch(()=>{});

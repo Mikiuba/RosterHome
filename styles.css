@@ -371,6 +371,6 @@ button.event.calendar-block.recovery.full{
 .storage-help{font-size:12px;line-height:1.45}.storage-actions{margin-top:10px}
 @media(max-width:700px){.storage-heading{align-items:center}.storage-status-grid{grid-template-columns:1fr}.storage-actions{display:grid;grid-template-columns:1fr 1fr}.storage-actions .btn{width:100%}}
 
-/* v0.3.2.2 interaction safety */
+/* v0.3.2.3 interaction safety */
 .calendar,.tabs,.calendar-view-switch,.calendar-density-switch{touch-action:manipulation}
 button{touch-action:manipulation;-webkit-tap-highlight-color:rgba(255,255,255,.08)}

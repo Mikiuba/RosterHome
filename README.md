@@ -1,4 +1,4 @@
-# RosterHome v0.3.2.2
+# RosterHome v0.3.2.3
 
 Hotfix de interacción iOS/PWA.
 
@@ -38,7 +38,7 @@ Aunque Safari conceda persistencia, se recomienda exportar una copia antes de bo
 
 ## Migración desde v0.3.1
 
-No hace falta reimportar los rosters. Al abrir v0.3.2.2 por primera vez, el estado existente en `localStorage` se migra automáticamente a IndexedDB.
+No hace falta reimportar los rosters. Al abrir v0.3.2.3 por primera vez, el estado existente en `localStorage` se migra automáticamente a IndexedDB.
 
 ## Actualización en GitHub
 
@@ -56,8 +56,10 @@ Añade el archivo nuevo:
 No hace falta modificar `roster-parser.js` ni reimportar ningún roster.
 
 
-## Hotfix v0.3.2.2
+## Hotfix v0.3.2.3
 - El almacenamiento durable ya no puede bloquear el arranque.
 - IndexedDB tiene timeout y cae automáticamente a localStorage.
 - El service worker usa actualización network-first y una instalación no falla si un archivo tarda en publicarse en GitHub Pages.
-- Todos los assets llevan cache-busting 0.3.2.2 para evitar mezclar builds.
+- Todos los assets llevan cache-busting 0.3.2.3 para evitar mezclar builds.
+## v0.3.2.3 — startup fix
+Auditoría completa del arranque. Se corrigió un error de inicialización: `STATE_SCHEMA_VERSION` debía existir antes de ejecutar `loadState()`. Ese fallo detenía `app.js` y dejaba la interfaz visible pero sin interacción. Se eliminó además el segundo handler delegado de navegación que se había añadido como workaround; vuelve a existir una sola ruta de eventos para las pestañas.
