@@ -1,4 +1,4 @@
-/* RosterHome v0.3.2 · durable local storage (IndexedDB + Storage Persistence + backups) */
+/* RosterHome v0.3.2.1 · resilient durable local storage */
 (function(){
   const DB_NAME='rosterhome-db';
   const DB_VERSION=1;
@@ -12,14 +12,16 @@
     if(!supported()) return Promise.reject(new Error('IndexedDB no disponible'));
     if(dbPromise) return dbPromise;
     dbPromise=new Promise((resolve,reject)=>{
+      let settled=false;
+      const timer=setTimeout(()=>{if(!settled){settled=true;reject(new Error('IndexedDB tardó demasiado en responder'));}},2500);
       const req=indexedDB.open(DB_NAME,DB_VERSION);
       req.onupgradeneeded=()=>{
         const db=req.result;
         if(!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
       };
-      req.onsuccess=()=>resolve(req.result);
-      req.onerror=()=>reject(req.error||new Error('No se pudo abrir IndexedDB'));
-      req.onblocked=()=>console.warn('[RosterHome] IndexedDB bloqueada por otra pestaña.');
+      req.onsuccess=()=>{if(settled){try{req.result.close();}catch(_){ }return;}settled=true;clearTimeout(timer);resolve(req.result);};
+      req.onerror=()=>{if(settled)return;settled=true;clearTimeout(timer);reject(req.error||new Error('No se pudo abrir IndexedDB'));};
+      req.onblocked=()=>console.warn('[RosterHome] IndexedDB bloqueada; RosterHome seguirá usando la copia local.');
     });
     return dbPromise;
   }
@@ -93,7 +95,7 @@
       app:'RosterHome',
       format:'rosterhome-backup',
       backupVersion:1,
-      appVersion:'0.3.2',
+      appVersion:'0.3.2.1',
       exportedAt:new Date().toISOString(),
       state:JSON.parse(JSON.stringify(state))
     };

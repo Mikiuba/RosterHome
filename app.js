@@ -78,7 +78,10 @@ function saveState(options={}){
   if(durableStorageReady && window.RosterStorage) window.RosterStorage.saveState(state,{immediate:!!options.immediate});
 }
 async function initializeDurableStorage(){
-  if(!window.RosterStorage) return;
+  if(!window.RosterStorage){
+    window.dispatchEvent(new CustomEvent('rh-storage-ready',{detail:{restored:false,fallback:true}}));
+    return {restored:false,fallback:true};
+  }
   let dbState=null;
   try{dbState=await window.RosterStorage.loadState();}catch(_){ }
   let restored=false;
@@ -95,7 +98,8 @@ async function initializeDurableStorage(){
   durableStorageReady=true;
   state.storageMigratedAt=state.storageMigratedAt||new Date().toISOString();
   saveState({immediate:true});
-  try{await window.RosterStorage.requestPersistence();}catch(_){ }
+  // Persistence is an enhancement, never a prerequisite for using the app.
+  try{await Promise.race([window.RosterStorage.requestPersistence(),new Promise(r=>setTimeout(()=>r(null),1800))]);}catch(_){ }
   if(restored){
     try{syncInputs();}catch(_){ }
     try{renderCalendar();}catch(_){ }
@@ -103,6 +107,7 @@ async function initializeDurableStorage(){
     window.dispatchEvent(new CustomEvent('rh-storage-restored'));
   }
   window.dispatchEvent(new CustomEvent('rh-storage-ready',{detail:{restored}}));
+  return {restored};
 }
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }

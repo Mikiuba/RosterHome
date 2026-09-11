@@ -1,4 +1,4 @@
-# RosterHome — v0.3.2
+# RosterHome — v0.3.2.1
 
 ## Persistencia de rosters
 
@@ -29,7 +29,7 @@ Aunque Safari conceda persistencia, se recomienda exportar una copia antes de bo
 
 ## Migración desde v0.3.1
 
-No hace falta reimportar los rosters. Al abrir v0.3.2 por primera vez, el estado existente en `localStorage` se migra automáticamente a IndexedDB.
+No hace falta reimportar los rosters. Al abrir v0.3.2.1 por primera vez, el estado existente en `localStorage` se migra automáticamente a IndexedDB.
 
 ## Actualización en GitHub
 
@@ -45,3 +45,10 @@ Añade el archivo nuevo:
 - `storage.js`
 
 No hace falta modificar `roster-parser.js` ni reimportar ningún roster.
+
+
+## Hotfix v0.3.2.1
+- El almacenamiento durable ya no puede bloquear el arranque.
+- IndexedDB tiene timeout y cae automáticamente a localStorage.
+- El service worker usa actualización network-first y una instalación no falla si un archivo tarda en publicarse en GitHub Pages.
+- Todos los assets llevan cache-busting 0.3.2.1 para evitar mezclar builds.

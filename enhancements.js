@@ -1,4 +1,4 @@
-/* RosterHome v0.3.2 · briefing/recovery + durable local persistence */
+/* RosterHome v0.3.2.1 · briefing/recovery + resilient persistence */
 (function(){
   // New per-person planning defaults. Existing users keep their saved values.
   if(state.rules.briefingLead0 == null) state.rules.briefingLead0=105;
@@ -452,5 +452,11 @@
   window.addEventListener('rh-storage-error',()=>{if($('storageBadge')){$('storageBadge').className='storage-badge bad';$('storageBadge').textContent='Error al guardar';}});
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')window.RosterStorage?.flush();});
   window.addEventListener('pagehide',()=>window.RosterStorage?.flush());
-  initializeDurableStorage().then(refreshStorageStatus);
+  // Never let the persistence layer prevent the rest of RosterHome from starting.
+  if(typeof initializeDurableStorage==='function'){
+    Promise.resolve(initializeDurableStorage()).catch(err=>console.warn('[RosterHome] Persistencia en fallback local',err)).finally(refreshStorageStatus);
+  }else{
+    console.warn('[RosterHome] Capa durable no disponible; usando almacenamiento local.');
+    refreshStorageStatus();
+  }
 })();
