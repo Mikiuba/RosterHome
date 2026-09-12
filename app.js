@@ -17,7 +17,7 @@ const DEFAULT_STATE = {
 let BOOT_LOCAL_RAW=null;
 try{BOOT_LOCAL_RAW=localStorage.getItem('rosterhome-state');}catch(_){ }
 const BOOT_HAD_LOCAL_STATE = !!BOOT_LOCAL_RAW;
-const STATE_SCHEMA_VERSION = 7;
+const STATE_SCHEMA_VERSION = 9;
 let durableStorageReady = false;
 let state = loadState();
 let renderedEvents = new Map();
@@ -50,7 +50,8 @@ function normalizeState(saved={}){
   const base=clone(DEFAULT_STATE);
   const people=[0,1].map(i=>{
     const person={...base.people[i], ...(saved.people?.[i]||{})};
-    person.duties=dedupeDuties(person.duties||[]);
+    person.coverage=Array.isArray(person.coverage)?person.coverage:[];
+    person.duties=dedupeDuties((person.duties||[]).map(d=>RosterParser.repairLegacyDuty(d)));
     return person;
   });
   const rules={...base.rules, ...(saved.rules||{})};
@@ -680,18 +681,9 @@ function ftlCivilAt(instant,timeZone){
   return `${o.year}-${o.month}-${o.day}T${o.hour}:${o.minute}:${o.second}`;
 }
 function ftlSourceCivil(d,which,timeZone){
-  const isStart=which==='start';
-  const sourceDate=isStart?d?.sourceCheckInDate:d?.sourceCheckOutDate;
-  const sourceTime=isStart?d?.sourceCheckInTime:d?.sourceCheckOutTime;
-  // A CrewLink "Local times at event airport" export already gives us the
-  // regulatory wall-clock value. Re-formatting an old persisted value as an
-  // instant can apply the airport offset a second time (03:00 HAJ -> 05:00),
-  // which falsely turns a NIGHT duty into EARLY.
-  if(d?.timeBasis==='local_event'&&sourceDate&&sourceTime){
-    const hhmm=String(sourceTime).replace(/\D/g,'').slice(0,4).padStart(4,'0');
-    return `${sourceDate}T${hhmm.slice(0,2)}:${hhmm.slice(2,4)}:00`;
-  }
-  return ftlCivilAt(isStart?d?.checkIn:d?.checkout,timeZone);
+  // Normalize instants at import/migration, then convert both ends to the SAME
+  // reference zone. Airport-local endpoints may be in different timezones.
+  return ftlCivilAt(which==='start'?d?.checkIn:d?.checkout,timeZone);
 }
 function ftlProfileBase(duties){
   const counts=new Map();
@@ -702,10 +694,8 @@ function ftlTypeLabel(flags){
   const xs=[];if(flags?.night)xs.push('NIGHT');if(flags?.early)xs.push('EARLY');if(flags?.late)xs.push('LATE');return xs.join(' + ')||'NORMAL';
 }
 function ftlEffectiveFlags(d,calculated){
-  // CrewLink's TYPE is the authoritative disruptive classification carried by
-  // the roster. This fallback is essential for rosters persisted by older
-  // RosterHome builds, which may not contain sourceCheckInTime/sourceCheckOutTime.
-  return window.RosterHomeFTL.resolveDisruptiveFlags(d?.type,calculated);
+  // TYPE remains a cross-check, never an override for incorrectly parsed times.
+  return {...calculated,source:'calculated'};
 }
 function ftlStatusWord(status){return status==='bad'?'NON-COMPLIANT':status==='review'?'REVIEW':'COMPLIANT';}
 function ftlCheck(label,text,status='ok'){
@@ -713,8 +703,11 @@ function ftlCheck(label,text,status='ok'){
 }
 function renderFtl(){
   const engine=window.RosterHomeFTL;
+  const history=window.RosterHistory;
+  const month=state.ftlMonth||state.month;
+  if($('ftlMonth'))$('ftlMonth').value=month||'';
   const all=state.people.flatMap(p=>p.duties||[]);
-  const duties=all.filter(d=>d.kind==='duty');
+  const duties=all.filter(d=>d.kind==='duty'&&(!month||String(d.date).startsWith(month)));
   const withRoster=state.people.filter(p=>(p.duties||[]).some(d=>d.kind==='duty')).length;
   if($('ftlDuties')) $('ftlDuties').textContent=String(duties.length);
   if($('ftlPeople')) $('ftlPeople').textContent=`${withRoster}/2`;
@@ -722,7 +715,7 @@ function renderFtl(){
     const dates=duties.map(d=>String(d.date||d.checkIn||'').slice(0,10)).filter(Boolean).sort();
     $('ftlPeriod').textContent=dates.length?`${dates[0].slice(8,10)}/${dates[0].slice(5,7)} – ${dates.at(-1).slice(8,10)}/${dates.at(-1).slice(5,7)}`:'—';
   }
-  if(!engine){
+  if(!engine||!history){
     if($('ftlOverall'))$('ftlOverall').textContent='ERROR';
     if($('ftlSummaryLine'))$('ftlSummaryLine').textContent='No se ha cargado ftl-engine.js.';
     if($('ftlDutyResults'))$('ftlDutyResults').innerHTML='<div class="notice">No se pudo cargar el motor FTL.</div>';
@@ -737,59 +730,81 @@ function renderFtl(){
   let badCount=0,reviewCount=0,okCount=0;
   const peopleHtml=[];
   state.people.forEach((person,pi)=>{
-    const ds=dedupeDuties(person.duties||[]).filter(d=>d.kind==='duty'&&d.checkIn&&d.checkout).sort((a,b)=>a.checkIn.localeCompare(b.checkIn));
+    const ds=dedupeDuties((person.duties||[]).map(d=>RosterParser.repairLegacyDuty(d))).filter(d=>d.kind==='duty'&&d.checkIn&&d.checkout).sort((a,b)=>a.checkIn.localeCompare(b.checkIn));
     if(!ds.length)return;
-    const base=ftlProfileBase(ds);
+    const base=person.homeBase||ftlProfileBase(ds);
     const baseTz=RosterParser?.airportTimeZone?.(base)||state.rules.homeTz||'UTC';
-    const records=ds.map(d=>({
-      endMs:new Date(d.checkout).getTime(),
-      dutyMinutes:ftlMinutes(d.dt)??Math.round((new Date(d.checkout)-new Date(d.checkIn))/60000),
-      flightMinutes:ftlMinutes(d.ft)||0
-    }));
-    const coverageDates=(person.duties||[]).map(x=>String(x.date||x.checkIn||'').slice(0,10)).filter(Boolean).sort();
-    const coverageStartMs=coverageDates.length?new Date(`${coverageDates[0]}T00:00:00Z`).getTime():new Date(ds[0].checkIn).getTime();
+    const records=ds.map(d=>history.record(d,RosterParser.airportTimeZone));
+    const coverage=person.coverage||[];
+    const gapText=(ranges)=>ranges.map(([a,b])=>`${history.civil(a,baseTz).slice(0,10)}–${history.civil(b-1,baseTz).slice(0,10)}`).join(', ');
     let rows='';
     ds.forEach((d,i)=>{
+      if(month&&!String(d.date).startsWith(month))return;
+      const hasFlight=!d.serviceType||d.serviceType==='flight',standby=d.serviceType==='standby';
       const tz=ftlReferenceZone(d,base),civilStart=ftlSourceCivil(d,'start',tz),civilEnd=ftlSourceCivil(d,'end',tz);
       const calculatedFlags=engine.classifyDisruptiveDuty(civilStart,civilEnd),flags=ftlEffectiveFlags(d,calculatedFlags),sectors=Math.max(1,d.flights?.length||1);
-      const actualFdp=ftlMinutes(d.fdp)??ftlMinutes(d.fdt),basicMax=engine.table2MaxForCivil(civilStart,sectors),crewMax=ftlMinutes(d.max);
+      const actualFdp=ftlMinutes(d.fdp)??ftlMinutes(d.fdt),basicMax=hasFlight?engine.table2MaxForCivil(civilStart,sectors):null,crewMax=ftlMinutes(d.max);
       const xfdp=ftlMinutes(d.xfdp);
       const checks=[];let status='ok';
+      if(d.timeRepairRequired){
+        rows+=`<details class="ftl-duty-row"><summary><b>${esc(d.date)} · ${esc(d.route||'Duty')}</b><span class="ftl-badge review">REVIEW</span></summary><div class="ftl-duty-body">Base horaria antigua sin datos suficientes para repararla. Reimporta el PDF original; no se calcula cumplimiento con horas inciertas.</div></details>`;
+        reviewCount++;return;
+      }
 
-      if(actualFdp!=null&&basicMax!=null){
+      if(!hasFlight){
+        checks.push(['Servicio',`${d.route} · ${ftlFormatMinutes((records[i].endMs-records[i].startMs)/60000)} de intervalo`,'ok']);
+        checks.push(['Crédito duty',`${ftlFormatMinutes(records[i].dutyMinutes)} · ${standby?'SDT CrewLink':'jornada completa'} · vuelo operado 0:00`,'ok']);
+        if(standby){
+          const cap=d.standbyType==='other'?960:d.standbyType==='airport'?360:null;
+          checks.push(['Standby',cap==null?'Modalidad no identificada':`${d.standbyType==='other'?'Fuera del aeropuerto (SDT ≈ 25%)':'Aeropuerto (SDT 100%)'} · máximo ${ftlFormatMinutes(cap)}`,cap==null?'review':d.elapsedMinutes<=cap?'ok':'bad']);
+        }
+      }else if(actualFdp!=null&&basicMax!=null){
         if(actualFdp<=basicMax){checks.push(['FDP básico',`${ftlFormatMinutes(actualFdp)} / ${ftlFormatMinutes(basicMax)} máx. · ${sectors} sector${sectors===1?'':'es'}`,'ok']);}
         else if(xfdp&&actualFdp<=xfdp){checks.push(['FDP básico',`${ftlFormatMinutes(actualFdp)} > ${ftlFormatMinutes(basicMax)} básico; xFDP CrewLink ${ftlFormatMinutes(xfdp)}`,'review']);status='review';}
         else{checks.push(['FDP básico',`${ftlFormatMinutes(actualFdp)} > ${ftlFormatMinutes(basicMax)} máx.`,'bad']);status='bad';}
       }else checks.push(['FDP básico','Datos insuficientes para comparar','review']),status='review';
       if(crewMax!=null&&basicMax!=null&&Math.abs(crewMax-basicMax)>1){checks.push(['CrewLink max',`${ftlFormatMinutes(crewMax)} vs Tabla 2 ${ftlFormatMinutes(basicMax)}`,'review']);if(status==='ok')status='review';}
 
-      checks.push(['Disruptive',`${ftlTypeLabel(flags)} · ${flags.source==='crewlink'?'CrewLink':'calculado'} · ref. ${d.acc||base||d.base||'—'} (${tz})`,'ok']);
+      if(hasFlight)checks.push(['Disruptive',`${ftlTypeLabel(flags)} · calculado · ref. ${d.acc||base||d.base||'—'} (${tz})`,'ok']);
       const crewType=String(d.type||'').toUpperCase();
-      if(flags.source!=='crewlink'&&crewType&&crewType!=='N/A'&&crewType!=='NORMAL'&&!crewType.includes(flags.primaryType)){
+      if(hasFlight&&crewType&&crewType!=='N/A'&&crewType!=='NORMAL'&&!crewType.includes(flags.primaryType)){
         checks.push(['TYPE CrewLink',`${crewType} ≠ cálculo ${flags.primaryType}`,'review']);if(status==='ok')status='review';
       }
 
       if(i>0){
         const prev=ds[i-1],home=String(d.base||'').toUpperCase()===base;
-        const prevDuty=ftlMinutes(prev.dt)??Math.round((new Date(prev.checkout)-new Date(prev.checkIn))/60000);
+        const prevDuty=Math.round((new Date(prev.checkout)-new Date(prev.checkIn))/60000);
         const actualRest=Math.round((new Date(d.checkIn)-new Date(prev.checkout))/60000);
         const requiredRest=engine.minimumRestMinutes(prevDuty,home);
-        const restStatus=actualRest>=requiredRest?'ok':'bad';
-        checks.push(['Descanso mínimo',`${ftlFormatMinutes(actualRest)} / ${ftlFormatMinutes(requiredRest)} req. · ${home?'base':'fuera de base'}`,restStatus]);
+        const restGaps=history.gaps(coverage,Date.parse(prev.checkout),Date.parse(d.checkIn));
+        const callout=prev.serviceType==='standby'&&actualRest<requiredRest&&hasFlight;
+        const restStatus=restGaps.length||callout?'review':actualRest>=requiredRest?'ok':'bad';
+        if(hasFlight||standby)checks.push(['Descanso mínimo',callout?'Asignación tras standby: faltan hora de aviso y condiciones de activación':`${ftlFormatMinutes(actualRest)} / ${ftlFormatMinutes(requiredRest)} req. · ${home?'base':'fuera de base'}${restGaps.length?' · falta cobertura '+gapText(restGaps):''}`,restStatus]);
+        else checks.push(['Intervalo previo',`${ftlFormatMinutes(actualRest)} entre servicios; sin FDP operado`,'ok']);
         if(restStatus==='bad')status='bad';
 
-        if(home){
+        const previousFdp=ds.slice(0,i).findLast(x=>!x.serviceType||x.serviceType==='flight');
+        if(home&&hasFlight&&previousFdp){
           const transition=engine.validateDisruptiveTransition(
-            {start:ftlSourceCivil(prev,'start',baseTz),end:ftlSourceCivil(prev,'end',baseTz)},
+            {start:ftlSourceCivil(previousFdp,'start',baseTz),end:ftlSourceCivil(previousFdp,'end',baseTz)},
             {start:ftlSourceCivil(d,'start',baseTz),end:ftlSourceCivil(d,'end',baseTz)},
             {atHomeOrOperatingBase:true}
           );
-          const previousFlags=ftlEffectiveFlags(prev,transition.previous);
+          const previousFlags=ftlEffectiveFlags(previousFdp,transition.previous);
           const nextFlags=ftlEffectiveFlags(d,transition.next);
           const requiresLocalNight=(previousFlags.late||previousFlags.night)&&nextFlags.early;
+          // A simulator/standby inside the interval cannot be counted as a
+          // continuous free local night. Sum only gaps between all services.
+          const intervening=ds.filter(x=>Date.parse(x.checkIn)>=Date.parse(previousFdp.checkout)&&Date.parse(x.checkout)<=Date.parse(d.checkIn));
+          let freeStart=previousFdp.checkout,nights=0;
+          for(const x of [...intervening,{checkIn:d.checkIn,checkout:d.checkIn}]){
+            nights+=engine.countLocalNights(ftlCivilAt(freeStart,baseTz),ftlCivilAt(x.checkIn,baseTz));freeStart=x.checkout;
+          }
+          transition.localNights=nights;
           const transitionCompliant=!requiresLocalNight||transition.localNights>=1;
           if(requiresLocalNight){
-            const trStatus=transitionCompliant?'ok':'bad';
+            const trGaps=history.gaps(coverage,Date.parse(previousFdp.checkout),Date.parse(d.checkIn));
+            const trStatus=trGaps.length?'review':transitionCompliant?'ok':'bad';
             checks.push(['LATE/NIGHT → EARLY',`${transition.localNights} local night${transition.localNights===1?'':'s'} entre FDPs`,trStatus]);
             if(trStatus==='bad')status='bad';
           }else{
@@ -798,20 +813,32 @@ function renderFtl(){
         }
       }else checks.push(['Descanso previo','No hay duty anterior dentro del roster importado','review']);
 
-      const cum=engine.cumulativeAt(records,i),cumValidation=engine.validateCumulative(cum);
+      const dailyStatus=checks.some(c=>c[2]==='bad')?'bad':checks.some(c=>c[2]==='review')?'review':'ok';
+      const windows=Object.fromEntries([7,14,28].map(n=>[n,history.cumulative(records,i,n,baseTz)]));
+      const cum={duty7:windows[7].duty,duty14:windows[14].duty,duty28:windows[28].duty,flight28:windows[28].flight},cumValidation=engine.validateCumulative(cum);
+      const cumulativeChecks=[];
       for(const c of cumValidation.checks){
-        const days=Number(c.label.match(/\d+/)?.[0]||28),windowStart=records[i].endMs-days*86400000,complete=coverageStartMs<=windowStart;
-        const cStatus=!c.compliant?'bad':complete?'ok':'review';
-        checks.push([c.label,`${ftlFormatMinutes(c.actual)} / ${ftlFormatMinutes(c.limit)}${complete?'':' · historial parcial'}`,cStatus]);
+        const days=Number(c.label.match(/\d+/)?.[0]||28),w=windows[days],missing=history.gaps(coverage,w.start,w.end),timingKnown=!c.label.startsWith('Flight')||w.flightTimingKnown;
+        const cStatus=!timingKnown?'review':!c.compliant?'bad':!missing.length?'ok':'review';
+        cumulativeChecks.push([c.label,`${ftlFormatMinutes(c.actual)} / ${ftlFormatMinutes(c.limit)}${missing.length?' · falta cobertura '+gapText(missing):''}${timingKnown?'':' · horarios de sectores sin reconciliar'}`,cStatus]);
         if(cStatus==='bad')status='bad';
       }
+      checks.push(...cumulativeChecks);
+      const cumulativeStatus=cumulativeChecks.some(c=>c[2]==='bad')?'bad':cumulativeChecks.some(c=>c[2]==='review')?'review':'ok';
 
+      // Aggregate every check, including missing history; never display green
+      // when one of the detailed checks still needs review.
+      status=checks.some(c=>c[2]==='bad')?'bad':checks.some(c=>c[2]==='review')?'review':'ok';
       if(status==='bad')badCount++;else if(status==='review')reviewCount++;else okCount++;
       const date=String(d.date||d.checkIn).slice(0,10),route=d.route||d.base||'Duty';
+      const reviewChecks=checks.filter(c=>c[2]==='review');
+      const reviewReason=reviewChecks.length?(reviewChecks.every(c=>c[0]==='Descanso previo'||c[1].includes('falta cobertura'))?'Historial incompleto · abre para ver fechas':reviewChecks.map(c=>c[0]).join(' · ')):'';
       const report=civilStart.slice(11,16),co=civilEnd.slice(11,16);
-      rows+=`<details class="ftl-duty-row"><summary><div class="ftl-duty-main"><b>${esc(date.slice(8,10)+'/'+date.slice(5,7))} · ${esc(report)}–${esc(co)}</b><small>${esc(ftlTypeLabel(flags))}</small></div><div class="ftl-duty-route"><b>${esc(route)}</b><small>FDP ${esc(ftlFormatMinutes(actualFdp))} · max ${esc(ftlFormatMinutes(basicMax))}</small></div><span class="ftl-badge ${status}">${ftlStatusWord(status)}</span></summary><div class="ftl-duty-body">${checks.map(c=>ftlCheck(c[0],c[1],c[2])).join('')}<div class="ftl-note">Base inferida del perfil: ${esc(base||'—')}. Las ventanas acumuladas solo se declaran completas cuando el roster importado contiene todo el periodo necesario.</div></div></details>`;
+      rows+=`<details class="ftl-duty-row"><summary><div class="ftl-duty-main"><b>${esc(date.slice(8,10)+'/'+date.slice(5,7))} · ${esc(report)}–${esc(co)}</b><small>${hasFlight?esc(ftlTypeLabel(flags)):'Sin vuelo operado'} · ${esc(tz)}</small></div><div class="ftl-duty-route"><b>${esc(route)}</b><small>${hasFlight?`FDP ${esc(ftlFormatMinutes(actualFdp))} · max ${esc(ftlFormatMinutes(basicMax))}`:`Crédito duty ${esc(ftlFormatMinutes(records[i].dutyMinutes))}`}</small><small>Jornada: ${ftlStatusWord(dailyStatus)} · Acumulados: ${ftlStatusWord(cumulativeStatus)}</small>${reviewReason?`<small>${esc(reviewReason)}</small>`:''}</div><span class="ftl-badge ${status}">${ftlStatusWord(status)}</span></summary><div class="ftl-duty-body">${checks.map(c=>ftlCheck(c[0],c[1],c[2])).join('')}<div class="ftl-note">Base del perfil: ${esc(base||'—')}. Acumulados por días naturales en ${esc(baseTz)}. COMPLIANT se refiere a las comprobaciones implementadas, no a todas las reglas del OM-A.</div></div></details>`;
     });
-    peopleHtml.push(`<section class="ftl-person-block"><div class="ftl-person-title"><b>${esc(person.name||`Perfil ${pi+1}`)}</b><span>Base inferida: ${esc(base||'—')}</span></div>${rows}</section>`);
+    const reserves=(person.duties||[]).filter(x=>x.kind==='status'&&x.status==='RES'&&(!month||x.date.startsWith(month)));
+    const coverageLabel=coverage.length?coverage.map(c=>`${c.start}–${c.end}: ${c.complete?'totales reconciliados con PDF':'lectura parcial'}`).join(' · '):'Reimporta los PDF: los datos antiguos no conservan cobertura verificada.';
+    peopleHtml.push(`<section class="ftl-person-block"><div class="ftl-person-title"><b>${esc(person.name||`Perfil ${pi+1}`)}</b><span>Base: ${esc(base||'—')}</span></div><p class="ftl-note">${esc(coverageLabel)}</p>${reserves.length?`<p class="ftl-note">RES: ${reserves.map(x=>esc(x.date)).join(', ')}. Crédito 0:00 según OM-A 7.1.16; no se considera OFF. El PDF no permite comprobar el aviso de asignación ni las 8 h protegidas.</p>`:''}${rows}</section>`);
   });
 
   if($('ftlDutyResults'))$('ftlDutyResults').innerHTML=peopleHtml.join('');
@@ -850,12 +877,17 @@ async function extractPdfText(file){
     // get detached from their C/I/C/O row.
     const mid=viewport.width*0.5;
     const build=(xs)=>{ const rows=[]; xs.sort((a,b)=>a.y-b.y||a.x-b.x); for(const it of xs){ let row=rows.find(r=>Math.abs(r.y-it.y)<2.4); if(!row){row={y:it.y,items:[]};rows.push(row);} row.items.push(it); } rows.sort((a,b)=>a.y-b.y); return rows.map(r=>r.items.sort((a,b)=>a.x-b.x).map(x=>x.str).join(' ')).join('\n'); };
+    // Read page-wide metadata BEFORE column splitting: the time-basis heading
+    // straddles the gutter in CrewLink and must stay intact.
+    out+='\n'+build([...items]).split('\n').filter(line=>/Local\s+times\s+at\s+event\s+airport|Individual duty plan|^Period:/i.test(line)).join('\n')+'\n';
     out+=`\n[[PAGE ${p} LEFT]]\n`+build(items.filter(i=>i.cx<mid))+`\n[[PAGE ${p} RIGHT]]\n`+build(items.filter(i=>i.cx>=mid));
   }
   return out;
 }
 
 function mergeParsed(personIndex, parsed, source){
+  const person=state.people[personIndex];
+  if(person.crewCode&&parsed.crew?.crewCode&&person.crewCode!==parsed.crew.crewCode)throw new Error(`Este perfil contiene ${person.crewCode}; el archivo es de ${parsed.crew.crewCode}. Selecciona el otro perfil.`);
   const old=dedupeDuties(state.people[personIndex].duties||[]);
   const incoming=dedupeDuties(parsed.duties||[]);
 
@@ -874,8 +906,11 @@ function mergeParsed(personIndex, parsed, source){
 
   state.people[personIndex].duties=dedupeDuties([...preserved,...incoming]);
   state.people[personIndex].source=source;
+  person.crewCode=parsed.crew?.crewCode||person.crewCode;
+  person.homeBase=parsed.coverage?.homeBase||person.homeBase;
+  person.coverage=window.RosterHistory.replaceCoverage(person.coverage,parsed.coverage);
   if(parsed.crew?.name && !state.people[personIndex].name) state.people[personIndex].name=parsed.crew.name;
-  if(parsed.period){const s=parsed.period.start; state.month=`${s.getUTCFullYear()}-${String(s.getUTCMonth()+1).padStart(2,'0')}`; state.focusDate=parsed.period.start.toISOString().slice(0,10);}
+  if(parsed.period){const latest=person.duties.map(d=>String(d.date||'').slice(0,7)).filter(Boolean).sort().at(-1);state.month=latest;state.ftlMonth=latest;state.focusDate=latest+'-01';}
   saveState({immediate:true}); syncInputs(); renderCalendar();
   return incoming.filter(x=>x.kind==='duty').length;
 }
@@ -890,7 +925,8 @@ function renderImportAudit(personIndex, parsed){
   const v=parsed?.validation; if(!v){el.innerHTML='';return;}
   const s=v.stats||{};
   const chips=[
-    `${s.duties||0} duties detectados`,
+    `${s.duties||0} servicios detectados`,
+    parsed.coverage?.complete?'Totales FT, DT y SDT reconciliados':'Cobertura parcial: revisar avisos',
     parsed.timeBasis==='local_event'?'horario CrewLink: local por aeropuerto':'horario CrewLink: UTC',
     `${s.overlaps||0} solapamientos`,
     `${s.brkMatches||0} continuidades BRK verificadas`,
@@ -904,7 +940,7 @@ function renderImportAudit(personIndex, parsed){
 }
 function validateBeforeMerge(parsed){
   const n=(parsed?.duties||[]).filter(x=>x.kind==='duty').length;
-  if(!n) throw new Error('No he encontrado ningún C/I/C/O reconocible. Prueba el fallback de texto o pásame este formato para añadirlo.');
+  if(!n) throw new Error('No he encontrado servicios con horario reconocible.');
   if(parsed.validation && !parsed.validation.ok){
     const first=parsed.validation.errors?.[0]||'La secuencia temporal no es coherente.';
     throw new Error(`No he guardado este roster porque el importador detectó una incoherencia: ${first}`);
@@ -921,8 +957,16 @@ async function handleFile(personIndex,file){
     renderImportAudit(personIndex,parsed);
     const detected=validateBeforeMerge(parsed);
     const count=mergeParsed(personIndex,parsed,file.name);
-    box.className='status ok'; box.textContent=`✓ ${count} duties importados y validados · periodo reemplazado · ${parsed.period?parsed.period.start.toISOString().slice(0,7):'periodo detectado'} · ${file.name}`;
-  }catch(e){box.className='status err';box.textContent='⚠️ '+e.message;}
+    box.className='status ok'; box.textContent=`✓ ${count} servicios importados · ${parsed.coverage?.complete?'totales reconciliados':'cobertura parcial'} · otros meses conservados · ${file.name}`;
+    return {ok:true,message:box.textContent};
+  }catch(e){box.className='status err';box.textContent='⚠️ '+e.message;return {ok:false,message:box.textContent};}
+}
+
+async function handleFiles(personIndex,files){
+  const input=$(`file${personIndex}`);if(input.disabled)return;input.disabled=true;
+  try{const results=[];for(const file of Array.from(files))results.push(await handleFile(personIndex,file));
+    const box=$(`status${personIndex}`);box.className='status '+(results.every(r=>r.ok)?'ok':'err');box.textContent=results.map(r=>r.message).join('\n');
+  }finally{input.disabled=false;input.value='';}
 }
 
 function syncInputs(){
@@ -982,10 +1026,11 @@ document.querySelectorAll('[data-calendar-density]').forEach(b=>on(b,'click',()=
   try{if(state.calendarDensity===b.dataset.calendarDensity)return;state.calendarDensity=b.dataset.calendarDensity;saveState();queueCalendarRender();}catch(e){console.error(e)}
 }));
 [0,1].forEach(i=>{
-  on($(`file${i}`),'change',e=>e.target.files?.[0]&&handleFile(i,e.target.files[0]));
+  on($(`file${i}`),'change',e=>e.target.files?.length&&handleFiles(i,e.target.files));
   on($(`name${i}`),'change',e=>{try{state.people[i].name=e.target.value.trim()||`Perfil ${i+1}`;saveState();renderCalendar();}catch(err){console.error(err)}});
 });
-document.querySelectorAll('[data-clear]').forEach(b=>on(b,'click',()=>{try{const i=Number(b.dataset.clear);state.people[i].duties=[];state.people[i].source=null;saveState();if($(`status${i}`))$(`status${i}`).textContent='Roster borrado.';if($(`audit${i}`))$(`audit${i}`).innerHTML='';renderCalendar();}catch(e){console.error(e)}}));
+document.querySelectorAll('[data-clear]').forEach(b=>on(b,'click',()=>{try{const i=Number(b.dataset.clear);state.people[i].duties=[];state.people[i].coverage=[];state.people[i].crewCode=null;state.people[i].homeBase=null;state.people[i].source=null;saveState();if($(`status${i}`))$(`status${i}`).textContent='Roster borrado.';if($(`audit${i}`))$(`audit${i}`).innerHTML='';renderCalendar();}catch(e){console.error(e)}}));
+on($('ftlMonth'),'change',e=>{if(/^\d{4}-\d{2}$/.test(e.target.value)){state.ftlMonth=e.target.value;saveState();renderFtl();}});
 on($('importText'),'click',()=>{try{const i=Number($('pastePerson').value),parsed=RosterParser.parseCrewLinkText($('pasteText').value);renderImportAudit(i,parsed);validateBeforeMerge(parsed);const n=mergeParsed(i,parsed,'texto pegado');$('pasteText').value='';alert(`${n} duties importados y validados.`);}catch(e){alert(e.message);}});
 on($('saveRules'),'click',()=>{try{new Intl.DateTimeFormat('es',{timeZone:$('homeTz').value}).format();readRules();alert('Reglas guardadas.');}catch(e){alert('Zona horaria no válida. Usa, por ejemplo, Europe/Athens o Europe/Madrid.');}});
 on($('prevMonth'),'click',()=>{try{shiftPeriod(-1)}catch(e){console.error(e)}});
@@ -999,4 +1044,4 @@ on(document,'keydown',e=>{if(e.key==='Escape'&&$('eventModal')&&!$('eventModal')
 // Navigation is bound once above. Keep a single source of truth for taps.
 try{syncInputs();}catch(err){console.error('[RosterHome] No se pudieron sincronizar inputs',err);}
 try{renderCalendar();}catch(err){console.error('[RosterHome] Render inicial en fallback',err);}
-if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./service-worker.js?v=0.3.5',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{});
+if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./service-worker.js?v=0.3.7',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{});

@@ -12,7 +12,7 @@
   // Unknown bases are rejected rather than silently assumed to be UTC.
   const AIRPORT_TZ = {
     HAJ:'Europe/Berlin', HER:'Europe/Athens', KGS:'Europe/Athens', RHO:'Europe/Athens', CFU:'Europe/Athens',
-    HRG:'Africa/Cairo', FUE:'Atlantic/Canary', ADB:'Europe/Istanbul', ASR:'Europe/Istanbul', PMI:'Europe/Madrid',
+    HRG:'Africa/Cairo', FUE:'Atlantic/Canary', LPA:'Atlantic/Canary', ADB:'Europe/Istanbul', ASR:'Europe/Istanbul', PMI:'Europe/Madrid',
     VIE:'Europe/Vienna', BER:'Europe/Berlin', FMO:'Europe/Berlin', NUE:'Europe/Berlin', LNZ:'Europe/Vienna',
     LGW:'Europe/London', DUS:'Europe/Berlin', MAN:'Europe/London', GRQ:'Europe/Amsterdam', CGN:'Europe/Berlin',
     AYT:'Europe/Istanbul', FRA:'Europe/Berlin', MUC:'Europe/Berlin', AMS:'Europe/Amsterdam', ATH:'Europe/Athens',
@@ -47,7 +47,26 @@
   }
 
   function parseTimeBasis(text) {
-    return /Local times at event airport/i.test(text) ? 'local_event' : 'utc';
+    return /Local\s+times\s+at\s+event\s+airport/i.test(text) ||
+      (/Local\s+times\s+at\b/i.test(text) && /event\s+airport/i.test(text)) ? 'local_event' : 'utc';
+  }
+
+  // Old column extraction split the timezone heading and persisted local wall
+  // times as UTC. Only migrate with retained source times AND CrewLink's local
+  // timezone markers; never infer an offset from TYPE, MAX, name or airport.
+  function repairLegacyDuty(d){
+    if(d.kind!=='duty'||d.timeRepairVersion===1)return d;
+    const marked=d.sourceCheckOutMarked||(d.flights||[]).some(f=>f.depMarked||f.arrMarked);
+    if(d.timeBasis!=='utc'||!marked)return d;
+    const keys=['sourceCheckInDate','sourceCheckInTime','sourceCheckOutDate','sourceCheckOutTime'];
+    const inZone=airportTimeZone(d.sourceCheckInAirport||d.base),outZone=airportTimeZone(d.sourceCheckOutAirport||d.checkoutBase||d.base);
+    if(!keys.every(k=>d[k])||!inZone||!outZone)return {...d,timeRepairRequired:true};
+    const checkIn=wallTimeToInstant(new Date(d.sourceCheckInDate+'T00:00:00Z'),d.sourceCheckInTime,inZone).toISOString();
+    const checkout=wallTimeToInstant(new Date(d.sourceCheckOutDate+'T00:00:00Z'),d.sourceCheckOutTime,outZone).toISOString();
+    const stated=parseDuration(d.dt),actual=minutesBetween(checkIn,checkout);
+    if(actual<=0||(stated!=null&&Math.abs(actual-stated*60)>10))return {...d,timeRepairRequired:true};
+    return {...d,checkIn,checkout,timeBasis:'local_event',sourceCheckInTimeZone:inZone,sourceCheckOutTimeZone:outZone,
+      timeRepairVersion:1,timeRepairRequired:false,timeRepairOriginal:{checkIn:d.checkIn,checkout:d.checkout,timeBasis:d.timeBasis}};
   }
 
   function airportTimeZone(iata) { return AIRPORT_TZ[String(iata||'').toUpperCase()] || null; }
@@ -172,7 +191,7 @@
         checkout=wallTimeToInstant(outDate,s.coTime,coZone||'UTC');
         while(checkout<=checkIn){outDate=plusDay(outDate,1);checkout=wallTimeToInstant(outDate,s.coTime,coZone||'UTC');}
       }else if(s.dt){const h=parseDuration(s.dt);if(h!=null){checkout=new Date(checkIn.getTime()+h*3600000);outDate=timeBasis==='local_event'&&coZone?calendarDateAtInstant(checkout,coZone):calendarDateAtInstant(checkout,'UTC');}}
-      const duty={kind:'duty',date:isoDay(baseDate),base:s.base,checkIn:checkIn.toISOString(),checkout:checkout?checkout.toISOString():null,checkoutBase:coBase,
+      const duty={kind:'duty',serviceType:'flight',date:isoDay(baseDate),base:s.base,checkIn:checkIn.toISOString(),checkout:checkout?checkout.toISOString():null,checkoutBase:coBase,
         type:s.type,ft:s.ft,dt:s.dt,fdt:s.fdt,max:s.max,sdt:s.sdt,dp:s.dp,fdp:s.fdp,rt:s.rt,brk:s.brk,xfdp:s.xfdp,acc:s.acc,ln:s.ln,flights:s.flights,route:s.route,dutyHours:s.dt?parseDuration(s.dt):(checkout?(checkout-checkIn)/3600000:null),parserDateSource:chosen.source,
         timeBasis,sourceCheckInDate:isoDay(baseDate),sourceCheckInTime:s.time,sourceCheckInAirport:s.base,sourceCheckInTimeZone:ciZone,
         sourceCheckOutDate:outDate?isoDay(outDate):null,sourceCheckOutTime:s.coTime,sourceCheckOutAirport:coBase,sourceCheckOutTimeZone:coZone,sourceCheckOutMarked:s.coMarked,
@@ -180,6 +199,81 @@
       duties.push(duty);previous=duty;
     }
     return duties;
+  }
+
+  function parseAdditionalServices(text,period,timeBasis){
+    const rows=[...text.matchAll(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)(\d{2})\b([^\n]*)/gm)];
+    const duties=[],errors=[];
+    for(let i=0;i<rows.length;i++){
+      const row=rows[i],head=row[3].trim();
+      if(!/^(Briefing\b|DH\/|STAND-BY\b|STBY\b|SBY\b)/i.test(head))continue;
+      let j=i+1;while(j<rows.length&&/^\s*C\/O\b/.test(rows[j][3]))j++;
+      const block=text.slice(row.index,j<rows.length?rows[j].index:text.length);
+      if(/\bC\/I\b/.test(block)){errors.push(`Jornada mixta ${row[2]}: necesita revisión de la agrupación de servicios.`);continue;}
+      const date=dateFromDay(period,+row[2]);
+      const fields=Object.fromEntries(['ft','dt','sdt','fdp','fdt','max','rt','brk','acc','type','ln','xfdp'].map(k=>[k,getField(block,k)]));
+      const standby=/^(STAND-BY|STBY|SBY)\b/.test(head),training=/^Briefing\b/i.test(head);
+      const dh=[...block.matchAll(/DH\/([A-Z0-9]+)\s+(\d+[A-Z]?)\s+([A-Z]{3})\s+!?(\d{4})(?:\+(\d+))?\s+!?(\d{4})(?:\+(\d+))?\s+([A-Z]{3})/g)];
+      const report=head.match(/^(?:Briefing|STAND-BY|STBY|SBY)\s+([A-Z]{3})\s+!?(\d{4})/i);
+      const base=report?.[1]||dh[0]?.[3],inZone=zoneFor(timeBasis,base);
+      if(!base||!inZone){errors.push(`Servicio ${isoDay(date)}: aeropuerto o zona horaria no reconocido.`);continue;}
+      let start=report?wallTimeToInstant(date,report[2],inZone):null;
+      let end=null,endAirport=base,positioning=[];
+      for(const leg of dh){
+        const depZone=zoneFor(timeBasis,leg[3]),arrZone=zoneFor(timeBasis,leg[8]);
+        if(!depZone||!arrZone){errors.push(`Zona horaria desconocida en posicionamiento ${isoDay(date)}.`);continue;}
+        let dep=wallTimeToInstant(plusDay(date,+(leg[5]||0)),leg[4],depZone);
+        while(dep<(end||start||date))dep=plusDay(dep);
+        let arr=wallTimeToInstant(plusDay(date,+(leg[7]||0)),leg[6],arrZone);
+        while(arr<dep)arr=plusDay(arr);
+        positioning.push({carrier:leg[1],number:leg[2],dep:leg[3],arr:leg[8],start:dep.toISOString(),end:arr.toISOString()});
+        end=arr;endAirport=leg[8];
+      }
+      if(standby){
+        const times=head.match(/(?:STAND-BY|STBY|SBY)\s+[A-Z]{3}\s+!?(\d{4})\s+!?(\d{4})/);
+        if(times){end=wallTimeToInstant(date,times[2],inZone);if(end<=start)end=plusDay(end);}
+      }else if(!end){
+        const deb=[...block.matchAll(/Debriefing\s+!?(\d{4})\s+([A-Z]{3})/gi)].at(-1);
+        if(deb){endAirport=deb[2];const z=zoneFor(timeBasis,endAirport);if(z)end=wallTimeToInstant(date,deb[1],z);if(end&&end<start)end=plusDay(end);}
+      }
+      const stated=minutesFromHours(parseDuration(fields.dt));
+      // Pure positioning has no C/I; CrewLink's last arrival and DT determine
+      // its report (e.g. 16:40 minus 9:30 = 07:10), without a guessed lead time.
+      if(!start&&end&&stated>0)start=new Date(end.getTime()-stated*60000);
+      if(!start||!end||end<=start){errors.push(`No se pudo reconstruir el servicio del ${isoDay(date)}.`);continue;}
+      const elapsed=minutesBetween(start,end),credit=standby?minutesFromHours(parseDuration(fields.sdt)):stated;
+      const standbyType=standby&&credit!=null?(Math.abs(credit-elapsed/4)<=1?'other':Math.abs(credit-elapsed)<=1?'airport':'unknown'):null;
+      const serviceType=standby?'standby':training?(dh.length?'training_positioning':'training'):'positioning';
+      const outZone=zoneFor(timeBasis,endAirport);
+      duties.push({...fields,kind:'duty',serviceType,date:isoDay(date),base,checkoutBase:endAirport,
+        checkIn:start.toISOString(),checkout:end.toISOString(),flights:[],positioning,
+        route:standby?`Standby · ${base}`:training?`Simulador · ${base}${dh.length?' + DH '+dh.map(x=>x[8]).join('–'):''}`:'DH '+[base,...dh.map(x=>x[8])].join('–'),
+        dutyHours:elapsed/60,dutyCreditMinutes:credit,standbyType,elapsedMinutes:elapsed,
+        parserDateSource:report?'explicit':'end-minus-DT',parserUnknownTimeZones:[],timeBasis,
+        sourceCheckInDate:isoDay(calendarDateAtInstant(start,inZone)),sourceCheckInTime:wallClockAtInstant(start,inZone),sourceCheckInAirport:base,sourceCheckInTimeZone:inZone,
+        sourceCheckOutDate:isoDay(calendarDateAtInstant(end,outZone)),sourceCheckOutTime:wallClockAtInstant(end,outZone),sourceCheckOutAirport:endAirport,sourceCheckOutTimeZone:outZone});
+    }
+    return {duties,errors};
+  }
+
+  function coverageAudit(text,period,duties,validation,timeBasis){
+    const summary=(label)=>{const m=text.match(new RegExp('(?:^|\\n)'+label+'\\s+(\\d+:\\d{2})','i'));return m?minutesFromHours(parseDuration(m[1])):null;};
+    // 'Duty time' may share a line with Flight time in the two-column export.
+    const dt=text.match(/\bDuty time\s+(\d+:\d{2})/i);
+    const expected={flight:summary('Flight time'),duty:dt?minutesFromHours(parseDuration(dt[1])):null,credit:summary('Duty time special')};
+    const service=duties.filter(d=>d.kind==='duty');
+    const actual={flight:0,duty:0,credit:0};
+    for(const d of service){actual.flight+=minutesFromHours(parseDuration(d.ft))||0;actual.duty+=minutesFromHours(parseDuration(d.dt))||0;actual.credit+=d.dutyCreditMinutes??minutesFromHours(parseDuration(d.sdt))??minutesFromHours(parseDuration(d.dt))??0;}
+    const issues=[];
+    for(const key of Object.keys(expected))if(expected[key]==null)issues.push(`Falta total ${key} del PDF`);else if(Math.abs(expected[key]-actual[key])>1)issues.push(`Total ${key}: importado ${actual[key]} min / PDF ${expected[key]} min`);
+    if([...text.matchAll(/\[DT\s+/gi)].length!==service.length)issues.push('Hay bloques DT sin importar o duplicados');
+    // RES is explicitly zero credit under OM-A 7.1.16(e). It remains a
+    // reserve status, never converted into a 24-hour worked duty or day OFF.
+    if(duties.some(d=>d.kind==='status'&&['STBY','SIM','TRG'].includes(d.status)))issues.push('Servicio sin horario o tratamiento reconocido');
+    if(!validation.ok)issues.push(...validation.errors);
+    const home=text.match(/\b([A-Z]{3})COR\/CREW\//)?.[1]||null;
+    return {start:period?isoDay(period.start):null,end:period?isoDay(period.end):null,timeBasis,timeZone:timeBasis==='utc'?'UTC':airportTimeZone(home),homeBase:home,
+      complete:!!period&&issues.length===0,parserVersion:2,expected,actual,issues};
   }
 
   function dedupe(list){
@@ -195,7 +289,7 @@
       if(timeBasis==='local_event'&&d.parserUnknownTimeZones?.length) errors.push(`No conozco la zona horaria del aeropuerto ${d.parserUnknownTimeZones.join(', ')} en un roster de horas locales.`);
       if(!d.route) warnings.push(`Duty ${d.date} ${d.base||''}: no se pudo reconstruir la ruta a partir de los sectores.`);
       if(!d.checkout) errors.push(`Duty ${d.date} ${d.route||d.base||''}: no se pudo determinar C/O.`);
-      if(d.checkout&&d.dt){const actual=minutesBetween(d.checkIn,d.checkout),stated=minutesFromHours(parseDuration(d.dt));if(Math.abs(actual-stated)>10)errors.push(`Duty ${d.date} ${d.route||d.base||''}: DT ${d.dt} no coincide con C/I–C/O (${actual} min).`);}
+      if(d.checkout&&d.dt&&d.serviceType!=='standby'){const actual=minutesBetween(d.checkIn,d.checkout),stated=minutesFromHours(parseDuration(d.dt));if(Math.abs(actual-stated)>10)errors.push(`Duty ${d.date} ${d.route||d.base||''}: DT ${d.dt} no coincide con C/I–C/O (${actual} min).`);}
       if(i>0){const prev=flying[i-1];if(prev.checkout){const gap=minutesBetween(prev.checkout,d.checkIn);minGapMinutes=minGapMinutes==null?gap:Math.min(minGapMinutes,gap);if(gap<0){overlaps++;errors.push(`Solapamiento: ${prev.date} ${prev.route||prev.base||''} termina después de que empiece ${d.date} ${d.route||d.base||''}.`);}else if(gap<120)warnings.push(`Intervalo muy corto (${gap} min) entre ${prev.date} y ${d.date}; conviene revisar el PDF.`);if(prev.brk){
             const hasIntermediateOperationalStatus=operationalStatuses.some(x=>x.date>prev.date&&x.date<=d.date);
             if(!hasIntermediateOperationalStatus){const expected=minutesFromHours(parseDuration(prev.brk));if(expected!=null){if(Math.abs(gap-expected)<=10)brkMatches++;else if(gap>=0&&Math.abs(gap-expected)>30)warnings.push(`BRK ${prev.brk} no coincide con el intervalo calculado (${Math.floor(gap/60)}:${String(gap%60).padStart(2,'0')}) tras ${prev.date}.`);}}
@@ -209,12 +303,18 @@
     const text=cleanText(input);const period=parsePeriod(text);const crew=parseCrewName(text);const timeBasis=parseTimeBasis(text);const starts=collectBlocks(text);
     const structures=starts.map((s,i)=>parseStructuralBlock(text,s,i+1<starts.length?starts[i+1].lineStart:Math.min(text.length,s.index+5000)));
     let duties=buildDuties(text,period,structures,timeBasis);
+    const additional=parseAdditionalServices(text,period,timeBasis);
+    duties.push(...additional.duties);
     const seenStatus=new Set();
     const dayLineRe=new RegExp('(?:^|\\n)\\s*'+DAY_RE+'(\\d{2})\\s+(ROFF|OFF|RES|SBY|STBY|STAND-BY|STAND\\s+BY|VAC|ABS|SIM|TRG)\\b(?:\\s+([A-Z]{3}))?','gmi');
     let m;while((m=dayLineRe.exec(text))){const date=isoDay(dateFromDay(period,Number(m[2])));let status=m[3].toUpperCase().replace(/\s+/g,'-');if(status==='STAND-BY'||status==='STBY'||status==='SBY')status='STBY';const k=date+'|'+status;if(seenStatus.has(k))continue;seenStatus.add(k);duties.push({kind:'status',date,status,base:m[4]||null,timeBasis});}
+    duties=duties.filter(d=>!(d.kind==='status'&&['STBY','SIM','TRG'].includes(d.status)&&additional.duties.some(x=>x.date===d.date)));
     duties=dedupe(duties).sort((a,b)=>(a.checkIn||a.date).localeCompare(b.checkIn||b.date));const validation=validateDuties(duties,timeBasis);
-    return {period,crew,duties,validation,timeBasis,rawLength:text.length};
+    validation.errors.push(...additional.errors);validation.ok=validation.errors.length===0;
+    const coverage=coverageAudit(text,period,duties,validation,timeBasis);
+    validation.warnings.push(...coverage.issues);
+    return {period,crew,duties,validation,coverage,timeBasis,rawLength:text.length};
   }
 
-  return {parseCrewLinkText,parsePeriod,parseCrewName,parseDuration,validateDuties,parseTimeBasis,airportTimeZone};
+  return {parseCrewLinkText,parsePeriod,parseCrewName,parseDuration,validateDuties,parseTimeBasis,airportTimeZone,repairLegacyDuty};
 });

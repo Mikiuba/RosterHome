@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b1020" />
   <title>RosterHome</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=0.3.5" />
+  <link rel="stylesheet" href="styles.css?v=0.3.7" />
 </head>
 <body>
 <div class="app">
@@ -113,7 +113,7 @@
         <h2>👨‍✈️ Perfil 1</h2>
         <div class="fieldrow"><div><label>Nombre</label><input id="name0" value="Miguel"></div><div><label>Color lógico</label><input value="Azul" disabled></div></div>
         <label>Roster CrewLink / NetLine (.pdf o .txt)</label>
-        <div class="drop"><strong>Selecciona el roster</strong><span class="muted">La app detecta automáticamente si CrewLink usa UTC u horas locales y lee C/I, sectores, C/O, DT, EARLY/LATE/NIGHT, OFF y STBY.</span><br><br><input type="file" id="file0" accept=".pdf,.txt,text/plain,application/pdf"></div>
+        <div class="drop"><strong>Selecciona uno o varios rosters de Miguel</strong><span class="muted">Puedes seleccionar agosto y septiembre juntos. Incluye vuelos, simuladores, posicionamientos y standbys. Conserva otros meses.</span><br><br><input type="file" id="file0" multiple accept=".pdf,.txt,text/plain,application/pdf"></div>
         <div id="status0" class="status"></div>
         <div id="audit0" class="import-audit"></div>
         <div class="actions"><button class="btn danger" data-clear="0">Borrar roster</button></div>
@@ -123,7 +123,7 @@
         <h2>👩‍✈️ Perfil 2</h2>
         <div class="fieldrow"><div><label>Nombre</label><input id="name1" value="Nicole"></div><div><label>Color lógico</label><input value="Violeta" disabled></div></div>
         <label>Roster CrewLink / NetLine (.pdf o .txt)</label>
-        <div class="drop"><strong>Selecciona el roster</strong><span class="muted">Admite también el formato CrewLink con “Local times at event airport”, marcadores ! y cambios de día +1.</span><br><br><input type="file" id="file1" accept=".pdf,.txt,text/plain,application/pdf"></div>
+        <div class="drop"><strong>Selecciona uno o varios rosters de Nicole</strong><span class="muted">Puedes seleccionar agosto y septiembre juntos. Detecta horas locales por aeropuerto y reconcilia los totales del PDF.</span><br><br><input type="file" id="file1" multiple accept=".pdf,.txt,text/plain,application/pdf"></div>
         <div id="status1" class="status"></div>
         <div id="audit1" class="import-audit"></div>
         <div class="actions"><button class="btn danger" data-clear="1">Borrar roster</button></div>
@@ -145,6 +145,7 @@
   </section>
 
   <section id="ftlView" class="view">
+    <label for="ftlMonth">Mes a analizar (los otros meses se usan como historial)</label><input type="month" id="ftlMonth">
     <div class="card ftl-card">
       <div class="ftl-head">
         <div>
@@ -152,10 +153,10 @@
           <h2>FTL</h2>
           <p class="muted">Validación automática del roster contra las reglas núcleo del OM-A Ch. 7 de Corendon Airlines Europe.</p>
         </div>
-        <span class="ftl-status ok" id="ftlEngineStatus">Motor FTL · OM-A core v0.3.5</span>
+        <span class="ftl-status ok" id="ftlEngineStatus">Motor FTL · OM-A core v0.3.7</span>
       </div>
 
-      <div class="notice ftl-warning"><b>Ámbito:</b> valida FDP básico (Tabla 2), descanso mínimo, límites acumulados y disruptive schedules. Los casos que dependen de extensión planificada, split duty, standby, posicionamiento especial o estado de aclimatación no inferible se marcan para revisión en vez de declararlos ilegales.</div>
+      <div class="notice ftl-warning"><b>Ámbito:</b> FDP básico, descanso previo, transición LATE/NIGHT → EARLY y acumulados 7/14/28 días. Incluye simuladores, posicionamientos y crédito SDT de standby. Activaciones de standby, jornadas mixtas con vuelo operado y otras condiciones no inferibles requieren revisión. No certifica límites anuales, recovery extendido ni todas las reglas del OM-A.</div>
 
       <div class="ftl-overview">
         <div class="ftl-metric"><span>Duties importados</span><b id="ftlDuties">0</b></div>
@@ -283,7 +284,7 @@
     <div class="card" style="margin-top:16px"><h3>⚖️ Carga del mes</h3><p class="muted">Comparación rápida para ver quién llega con más carga, noches o recoveries.</p><div id="workloadCompare" class="workload-compare"></div></div>
   </section>
 
-  <div class="footer">MVP local · RosterHome v0.3.5 · Motor FTL OM-A core activo.</div>
+  <div class="footer">MVP local · RosterHome v0.3.7 · Motor FTL OM-A core activo.</div>
 </div>
 
 <div id="eventModal" class="modal hidden" aria-hidden="true">
@@ -301,10 +302,11 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="storage.js?v=0.3.5"></script>
-<script src="roster-parser.js?v=0.3.5"></script>
-<script src="ftl-engine.js?v=0.3.5"></script>
-<script src="app.js?v=0.3.5"></script>
-<script src="enhancements.js?v=0.3.5"></script>
+<script src="storage.js?v=0.3.7"></script>
+<script src="roster-parser.js?v=0.3.7"></script>
+<script src="roster-history.js?v=0.3.7"></script>
+<script src="ftl-engine.js?v=0.3.7"></script>
+<script src="app.js?v=0.3.7"></script>
+<script src="enhancements.js?v=0.3.7"></script>
 </body>
 </html>

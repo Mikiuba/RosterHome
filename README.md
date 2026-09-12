@@ -1,69 +1,56 @@
-# RosterHome v0.3.5
+# RosterHome v0.3.7
 
-Actualización FTL sobre la base estable v0.3.2.3.
+## Instalación
 
-## FTL activado
+1. Sustituye los archivos de la app en la misma dirección de GitHub Pages por el contenido de esta carpeta.
+2. Comprueba que el pie muestra v0.3.7.
+3. Reimporta los PDF originales de agosto y septiembre en cada perfil: MTR en Miguel, ENJ en Nicole. Puedes seleccionar ambos meses juntos.
+4. Selecciona septiembre en FTL.
 
-La pestaña **FTL** deja de ser un placeholder e incorpora un motor local basado en Corendon Airlines Europe OM-A Ch. 7 para las reglas que pueden determinarse de forma fiable a partir de un CrewLink individual duty plan:
+No borres los datos de Safari. Se mantienen preferencias, el otro perfil y los meses fuera del periodo importado. La reimportación es necesaria para recuperar servicios omitidos y verificar la cobertura del historial. El ZIP no contiene los PDF personales.
 
-- FDP máximo básico, **Tabla 2**, por reporting time y sectores (OM-A 7.1.7.2.1).
-- Descanso mínimo en Home/Operating Base y fuera de base (OM-A 7.1.17.1/2).
-- Límites acumulados de duty: 60 h / 7 días, 110 h / 14 días, 190 h / 28 días (OM-A 7.1.11.1).
-- Flight time 100 h / 28 días (OM-A 7.1.11.2(a)).
-- Disruptive schedules **Early Type** y Local Night (OM-A definitions + 7.1.17.5).
+## Correcciones
 
-### Corrección crítica 10/09
+- Conserva el encabezado horario completo de CrewLink antes de separar columnas: MTR exporta UTC; ENJ, horas locales del aeropuerto.
+- Normaliza instantes con zonas IANA, incluida Atlantic/Canary para LPA. No utiliza un desfase fijo anual.
+- Calcula disruptive y Tabla 2 desde las horas corregidas, sin sustituir el cálculo por TYPE.
+- Incluye briefing, simulador, debriefing y posicionamientos; separa servicios no operados del tiempo de vuelo.
+- Separa duración de standby y crédito acumulable SDT. La categoría inferida por el crédito se identifica en pantalla; si es desconocida, requiere revisión.
+- Mantiene RES como reserva, no como OFF, con crédito cero y advertencia de información no verificable sobre aviso y sueño protegido.
+- Verifica cada periodo contra los totales FT, DT y SDT del PDF y el número de servicios temporizados. Un periodo con discrepancias no completa el historial.
+- Une meses por perfil sin duplicarlos; identifica huecos de cobertura y prorratea intervalos que cruzan el comienzo de una ventana acumulada.
+- Separa el resultado de las comprobaciones del servicio y el de los acumulados.
 
-La clasificación ya no usa `report < 06:00 = EARLY`.
+## Validación con los cuatro originales
 
-- `NIGHT`: duty que invade cualquier parte de **02:00–04:59**.
-- `EARLY`: duty que **empieza 05:00–05:59**.
-- `LATE`: duty que **termina 23:00–01:59**.
-- La exigencia de 1 Local Night solo se activa para **LATE/NIGHT → EARLY** en Home/Operating Base.
+| Perfil / mes | Servicios | Flight time | Duty time | Crédito acumulable |
+| --- | ---: | ---: | ---: | ---: |
+| MTR agosto | 13 | 80:34 | 118:06 | 118:06 |
+| MTR septiembre | 13 | 61:05 | 112:50 | 112:50 |
+| ENJ agosto | 16 | 88:46 | 124:33 | 129:47 |
+| ENJ septiembre | 10 | 84:29 | 109:12 | 109:12 |
 
-Por tanto, la secuencia real del 08/09 al 10/09 (`LATE → NIGHT`, report 03:00) no dispara falsamente la regla de transición.
+Los servicios adicionales MTR del 1–3 de septiembre suman 26:15. Los tres standby ENJ de agosto aportan 5:14 de crédito.
 
-## Estados
+Con ambos meses importados, los 23 servicios de septiembre pasan las comprobaciones implementadas. Agosto puede requerir julio para sus ventanas anteriores. Esto no certifica cumplimiento operacional completo: límites anuales, recuperación extendida, condiciones de reserva, aclimatación no inferible y otros supuestos requieren información y comprobaciones adicionales.
 
-- **COMPLIANT**: las comprobaciones automáticas completas del duty pasan.
-- **NON-COMPLIANT**: existe una infracción cuantificable con los datos importados.
-- **REVIEW**: falta historial suficiente o el caso depende de una regla especial que no debe inferirse (por ejemplo una extensión planificada).
+Para ENJ, el 8/9 comienza a las 13:30 locales y su máximo básico calculado es 12:45; el 10/9 comienza a las 03:00 y su máximo es 11:00. Mostrar 15:30 y 05:00 respectivamente indica que esas horas todavía no están corregidas.
 
-La aplicación no inventa legalidad cuando faltan datos. Casos como standby, split duty, posicionamiento especial, extensión planificada o aclimatación no inferible se dejan para revisión.
+## Pruebas
 
-## UI
+Requieren Node y pdfjs-dist para extracción de los PDF originales:
 
-La pestaña FTL muestra:
+```sh
+node tests/ftl-engine.test.js
+node tests/import-ftl.test.cjs /ruta/ENJ-SEP.pdf
+node tests/history-integration.test.cjs /ruta/carpeta-con-los-cuatro-originales
+```
 
-- resultado global;
-- resultado desplegable por duty;
-- clasificación EARLY/LATE/NIGHT;
-- FDP real vs máximo;
-- descanso anterior;
-- transición disruptive;
-- límites acumulados;
-- la **Tabla 2 completa enfrentada al reporting time** en una leyenda desplegable.
+Se prueban extracción real, migración horaria, totales, intervalos, cambio estacional, huecos, aislamiento de perfiles, reimportación, persistencia y HTML generado por la app mediante Node VM. No es una prueba en Safari ni del despliegue publicado.
 
-## Persistencia y PWA
+## Referencias
 
-Se conservan íntegros los arreglos de v0.3.2.3:
+Corendon Airlines Europe OM-A, capítulo 7, revisión 15 del 15/07/2024: apartados 7.1.11.4, 7.1.13, 7.1.15, 7.1.16 y 7.1.17, además de Tabla 2 y límites acumulados.
 
-- localStorage + IndexedDB;
-- solicitud de almacenamiento persistente;
-- backup/restauración JSON;
-- service worker network-first;
-- hotfixes de interacción iOS/PWA.
-
-## Archivos nuevos / modificados
-
-Nuevo:
-- `ftl-engine.js`
-
-Modificados:
-- `index.html`
-- `app.js`
-- `styles.css`
-- `service-worker.js`
-- `README.md`
-
-`roster-parser.js`, `storage.js`, `enhancements.js` y `manifest.webmanifest` conservan la base estable salvo el cache-busting de carga desde `index.html`.
+- [EASA: crédito de standby fuera del aeropuerto](https://www.easa.europa.eu/en/faq/47641)
+- [EASA: reserva y descanso](https://www.easa.europa.eu/en/faq/47645)

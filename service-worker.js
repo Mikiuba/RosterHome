@@ -1,5 +1,5 @@
-const CACHE='rosterhome-v0.3.5';
-const FALLBACKS=['./index.html','./styles.css','./roster-parser.js','./ftl-engine.js','./app.js','./enhancements.js','./storage.js','./manifest.webmanifest'];
+const CACHE='rosterhome-v0.3.7';
+const FALLBACKS=['./index.html','./styles.css','./roster-parser.js','./roster-history.js','./ftl-engine.js','./app.js','./enhancements.js','./storage.js','./manifest.webmanifest'];
 
 self.addEventListener('install',event=>{
   // Do not use cache.addAll(): one transient 404 during GitHub Pages deployment
