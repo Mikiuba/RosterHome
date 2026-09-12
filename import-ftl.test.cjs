@@ -3,6 +3,7 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const parser=require('../roster-parser');
 const engine=require('../ftl-engine');
+const history=require('../roster-history');
 const app=fs.readFileSync(require.resolve('../app.js'),'utf8');
 async function main(){
   const pdfPath=process.argv[2];
@@ -32,8 +33,8 @@ async function main(){
   assert.equal(parser.repairLegacyDuty({...legacy[0],sourceCheckInTime:null}).timeRepairRequired,true);
   assert.equal(parser.parseTimeBasis('Local times at\n[[PAGE RIGHT]]\nevent airport'),'local_event');
   const nodes=new Map();const $=id=>{if(!nodes.has(id))nodes.set(id,{});return nodes.get(id);};
-  const renderContext={window:{RosterHomeFTL:engine},RosterParser:parser,Intl,Date,console,$,
-    state:{people:[{name:'Test',duties:[...parsed.duties.filter(d=>d.kind!=='duty'),...legacy]}],rules:{homeTz:'Europe/Athens'}},
+  const renderContext={window:{RosterHomeFTL:engine,RosterHistory:history},RosterParser:parser,Intl,Date,console,$,
+    state:{people:[{name:'Test',coverage:[parsed.coverage],duties:[...parsed.duties.filter(d=>d.kind!=='duty'),...legacy]}],month:'2026-09',rules:{homeTz:'Europe/Athens'}},
     dedupeDuties:x=>x,esc:x=>String(x??''),gapLabel:String};
   vm.createContext(renderContext);
   vm.runInContext(app.slice(app.indexOf('function ftlMinutes'),app.indexOf('function renderSummary')),renderContext);
@@ -47,7 +48,7 @@ async function main(){
   assert.ok(!html.includes('NON-COMPLIANT'));
   assert.ok(html.includes('LATE → NIGHT · no exige Local Night'));
   assert.ok(html.includes('Historial incompleto'));
-  assert.equal($('ftlSummaryLine').textContent,'1 compliant · 9 review · 0 non-compliant · 10 duties');
+  assert.equal($('ftlSummaryLine').textContent,'2 compliant · 8 review · 0 non-compliant · 10 duties');
   renderContext.state.people[0].duties=parsed.duties;
   renderContext.renderFtl();
   assert.equal($('ftlDutyResults').innerHTML,html,'Fresh import and legacy repair must render identically');
