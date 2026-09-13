@@ -1,4 +1,4 @@
-const CACHE='rosterhome-v0.3.7';
+const CACHE='rosterhome-v0.5.0';
 const FALLBACKS=['./index.html','./styles.css','./roster-parser.js','./roster-history.js','./ftl-engine.js','./app.js','./enhancements.js','./storage.js','./manifest.webmanifest'];
 
 self.addEventListener('install',event=>{
@@ -18,6 +18,7 @@ self.addEventListener('activate',event=>{
 self.addEventListener('fetch',event=>{
   if(event.request.method!=='GET') return;
   const url=new URL(event.request.url);
+  if(url.pathname.startsWith('/api/')) return;
   if(url.origin!==self.location.origin) return;
   event.respondWith((async()=>{
     const cache=await caches.open(CACHE);

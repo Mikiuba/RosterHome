@@ -1,3 +1,5 @@
+#crewlinkConnection .crewlink-check{display:flex;align-items:center;gap:10px;margin:14px 0;}
+#crewlinkConnection .crewlink-check input[type="checkbox"]{width:18px;min-width:18px;margin:0;}
 :root{
   --bg:#0b1020;--panel:#131a2d;--panel2:#182138;--text:#eef3ff;--muted:#9faccc;
   --line:#2a3552;--accent:#79a7ff;--good:#7be0b3;--warn:#ffd57a;--bad:#ff8b9e;--heart:#ff9fc5;

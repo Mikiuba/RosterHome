@@ -1,56 +1,63 @@
-# RosterHome v0.3.7
+# RosterHome v0.5.0 — Cloudflare + GitHub
 
-## Instalación
+Actualización manual desde CrewLink, para usar desde navegador e iPhone sin mantener encendido el ordenador. Esta entrega está preparada para desplegar; todavía no está publicada ni se ha verificado la conexión desde la red de Cloudflare.
 
-1. Sustituye los archivos de la app en la misma dirección de GitHub Pages por el contenido de esta carpeta.
-2. Comprueba que el pie muestra v0.3.7.
-3. Reimporta los PDF originales de agosto y septiembre en cada perfil: MTR en Miguel, ENJ en Nicole. Puedes seleccionar ambos meses juntos.
-4. Selecciona septiembre en FTL.
+## Subir a GitHub
 
-No borres los datos de Safari. Se mantienen preferencias, el otro perfil y los meses fuera del periodo importado. La reimportación es necesaria para recuperar servicios omitidos y verificar la cobertura del historial. El ZIP no contiene los PDF personales.
+Descomprime el ZIP. Sube su **contenido a la raíz del repositorio** de RosterHome: `wrangler.jsonc` y `package.json` deben aparecer junto a `index.html`, no dentro de otra carpeta. Conserva las carpetas `cloudflare`, `scripts` y `tests`. No subas el ZIP sin descomprimir. El código no contiene credenciales ni el HAR.
 
-## Correcciones
+Puedes conservar GitHub Pages: seguirá mostrando la app y el importador manual de PDF/TXT. Para conectar con CrewLink utiliza la nueva URL de Cloudflare.
 
-- Conserva el encabezado horario completo de CrewLink antes de separar columnas: MTR exporta UTC; ENJ, horas locales del aeropuerto.
-- Normaliza instantes con zonas IANA, incluida Atlantic/Canary para LPA. No utiliza un desfase fijo anual.
-- Calcula disruptive y Tabla 2 desde las horas corregidas, sin sustituir el cálculo por TYPE.
-- Incluye briefing, simulador, debriefing y posicionamientos; separa servicios no operados del tiempo de vuelo.
-- Separa duración de standby y crédito acumulable SDT. La categoría inferida por el crédito se identifica en pantalla; si es desconocida, requiere revisión.
-- Mantiene RES como reserva, no como OFF, con crédito cero y advertencia de información no verificable sobre aviso y sueño protegido.
-- Verifica cada periodo contra los totales FT, DT y SDT del PDF y el número de servicios temporizados. Un periodo con discrepancias no completa el historial.
-- Une meses por perfil sin duplicarlos; identifica huecos de cobertura y prorratea intervalos que cruzan el comienzo de una ventana acumulada.
-- Separa el resultado de las comprobaciones del servicio y el de los acumulados.
+## Conectar Cloudflare
 
-## Validación con los cuatro originales
+1. Workers & Pages → Create application → **Connect GitHub**.
+2. Autoriza únicamente el repositorio correspondiente y selecciónalo.
+3. Nombre del Worker: **rosterhome-crewlink** (debe coincidir con `wrangler.jsonc`). Selecciona la rama que utilizas; no se presupone que se llame `main`.
+4. Directorio raíz: el directorio que contiene `package.json` y `wrangler.jsonc` (raíz del repositorio si seguiste el paso anterior).
+5. Build command: `npm run build`.
+6. Deploy command: `npx wrangler deploy`.
+7. Mantén Workers Free. No se configura dominio comprado, base de datos, cron ni almacenamiento de contraseñas.
 
-| Perfil / mes | Servicios | Flight time | Duty time | Crédito acumulable |
-| --- | ---: | ---: | ---: | ---: |
-| MTR agosto | 13 | 80:34 | 118:06 | 118:06 |
-| MTR septiembre | 13 | 61:05 | 112:50 | 112:50 |
-| ENJ agosto | 16 | 88:46 | 124:33 | 129:47 |
-| ENJ septiembre | 10 | 84:29 | 109:12 | 109:12 |
+Workers Builds instala la dependencia Wrangler declarada en `package.json`; no debes instalar Node, Python o PowerShell en el iPhone. En un equipo de desarrollo, los comandos equivalentes son `npm install`, `npm test` y `npm run deploy`.
 
-Los servicios adicionales MTR del 1–3 de septiembre suman 26:15. Los tres standby ENJ de agosto aportan 5:14 de crédito.
+## Proteger el conector
 
-Con ambos meses importados, los 23 servicios de septiembre pasan las comprobaciones implementadas. Agosto puede requerir julio para sus ventanas anteriores. Esto no certifica cumplimiento operacional completo: límites anuales, recuperación extendida, condiciones de reserva, aclimatación no inferible y otros supuestos requieren información y comprobaciones adicionales.
+Después del primer despliegue, en el Worker → Settings → Variables and Secrets, añade un **Secret**:
 
-Para ENJ, el 8/9 comienza a las 13:30 locales y su máximo básico calculado es 12:45; el 10/9 comienza a las 03:00 y su máximo es 11:00. Mostrar 15:30 y 05:00 respectivamente indica que esas horas todavía no están corregidas.
+Nombre: `ROSTERHOME_ACCESS_KEY`
 
-## Pruebas
+Valor: una clave aleatoria de entre 32 y 256 caracteres, generada por tu gestor de contraseñas. Debe ser distinta de tu contraseña de CrewLink. Conserva esa clave en tu gestor; no la pongas en archivos del repositorio, capturas o mensajes. Guarda y despliega la nueva configuración. Si falta este secreto, las descargas y la prueba de conexión permanecen bloqueadas.
 
-Requieren Node y pdfjs-dist para extracción de los PDF originales:
+Esta clave protege el conector para vuestro uso privado. La página estática de la app es pública, pero no contiene vuestros rosters ni puede consultar CrewLink sin la clave. No es un servicio multiusuario con cuentas individuales. Quien tenga la clave podrá usar el conector con sus propias credenciales; cámbiala si necesitas revocar el acceso. No se ha añadido una cuota por usuario; el límite de Workers Free sigue aplicando.
 
-```sh
-node tests/ftl-engine.test.js
-node tests/import-ftl.test.cjs /ruta/ENJ-SEP.pdf
-node tests/history-integration.test.cjs /ruta/carpeta-con-los-cuatro-originales
-```
+## Primera prueba
 
-Se prueban extracción real, migración horaria, totales, intervalos, cambio estacional, huecos, aislamiento de perfiles, reimportación, persistencia y HTML generado por la app mediante Node VM. No es una prueba en Safari ni del despliegue publicado.
+1. Abre la URL `workers.dev` que muestre Cloudflare.
+2. En Importar roster, introduce **solo la clave de acceso a RosterHome**.
+3. Pulsa **Comprobar conexión sin iniciar sesión**. No envía usuario, contraseña ni confirmaciones a CrewLink.
+4. Si aparece que alcanza el portal y reconoce el formulario, vuelve a introducir la clave, el usuario/contraseña CrewLink, el perfil y las fechas publicadas. Acepta el aviso HTTP y pulsa **Actualizar desde CrewLink**.
 
-## Referencias
+Las claves se vacían del formulario tras enviarlas. Usuario/contraseña CrewLink y cookies se usan en memoria durante esa solicitud y no se guardan en Cloudflare. La clave privada de acceso a RosterHome sí existe como secreto de configuración en Cloudflare. Los logs de aplicación no registran cuerpos, cookies ni credenciales; observabilidad del Worker desactivada en la configuración.
 
-Corendon Airlines Europe OM-A, capítulo 7, revisión 15 del 15/07/2024: apartados 7.1.11.4, 7.1.13, 7.1.15, 7.1.16 y 7.1.17, además de Tabla 2 y límites acumulados.
+El dispositivo se conecta por HTTPS a Cloudflare. El tramo de Cloudflare a Corendon conserva el HTTP del portal actual, sin cifrar. No se ha comprobado un acceso HTTPS alternativo.
 
-- [EASA: crédito de standby fuera del aeropuerto](https://www.easa.europa.eu/en/faq/47641)
-- [EASA: reserva y descanso](https://www.easa.europa.eu/en/faq/47645)
+## Datos y comportamiento
+
+- Solo descarga al pulsar el botón. No hay actualizaciones periódicas, tareas programadas ni consultas al abrir automáticamente.
+- Reutiliza el parser, totales y unión de periodos de la app existente. Comprueba usuario, periodo y totales antes de importar. No cambia el motor FTL heredado.
+- Los rosters permanecen en el navegador/dispositivo. La nueva URL tiene un almacenamiento distinto al de GitHub Pages y al de localhost. Exporta una copia desde la app anterior y restáurala en la nueva si quieres trasladar datos; esa restauración sustituye el estado del destino.
+- No sincroniza datos automáticamente entre vuestro ordenador y los dos teléfonos. Cada dispositivo puede importar manualmente los perfiles que necesite.
+- No marca como leídas ni confirma notificaciones operativas de CrewLink.
+
+## Verificación
+
+Pruebas locales con respuestas simuladas: flujo completo, cookies, UTC, prueba sin login, credenciales incorrectas, PDF inválido, destinos/redirecciones externos, límites de tamaño, fechas, aviso HTTP, clave y origen. Se valida la interfaz manual en un DOM simulado y se genera la carpeta de archivos públicos mediante una lista explícita.
+
+Pendiente: despliegue real con Wrangler, prueba de acceso Cloudflare → CrewLink:8090, consumo de CPU del plan Free y uso real en Safari/iPhone. El funcionamiento de v0.4.2 en Windows no confirma por sí solo el de Cloudflare.
+
+## Referencias consultadas
+
+- [Workers Builds y Git](https://developers.cloudflare.com/workers/ci-cd/builds/)
+- [Archivos estáticos y binding ASSETS](https://developers.cloudflare.com/workers/static-assets/binding/)
+- [Puertos personalizados](https://developers.cloudflare.com/workers/configuration/compatibility-flags/#allow-specifying-a-custom-port-when-making-a-subrequest-with-the-fetch-api)
+- [Límites del plan Free](https://developers.cloudflare.com/workers/platform/limits/)
