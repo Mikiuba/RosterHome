@@ -67,7 +67,7 @@ export async function crewlink(data,probe=false,transport=fetch){
   async function exchange(path,fields=null,pdf=false){
     let u=remoteUrl(path);
     for(let i=0;i<5;i++){
-      const headers=new Headers({'Accept':pdf?'application/pdf':'text/html','User-Agent':'RosterHome/0.5.0'}),cookie=jar.header(u);
+      const headers=new Headers({'Accept':pdf?'application/pdf':'text/html','User-Agent':'RosterHome/0.5.1'}),cookie=jar.header(u);
       if(cookie)headers.set('Cookie',cookie);
       if(fields)headers.set('Content-Type','application/x-www-form-urlencoded');
       const r=await transport(u.href,{method:fields?'POST':'GET',headers,body:fields?new URLSearchParams(fields).toString():undefined,redirect:'manual',signal:controller.signal});
