@@ -1,5 +1,5 @@
 const REMOTE='http://crewlink.corendonairlines.com:8090';
-const START=REMOTE+'/crewlink/crewlink.jsp?crewlinkOperation=crewlinkForCrew';
+const START=REMOTE+'/crewlink/crewlink.jsp?crewlinkOperation=crewlinkForCrew&resetSession=Y';
 const MAX_PDF=10*1024*1024,MAX_HTML=512*1024;
 class SafeError extends Error{}
 export function remoteUrl(path,base=REMOTE+'/crewlink/'){
@@ -13,12 +13,26 @@ export function forms(html){
   return [...html.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form\s*>/gi)].map(m=>({action:attrs(m[1]).action||'clApp',fields:Object.fromEntries([...m[2].matchAll(/<input\b[^>]*>/gi)].map(x=>attrs(x[0])).filter(a=>a.name).map(a=>[a.name,a.value||'']))}));
 }
 export function pdfUrl(html){
+  // CrewLink currently embeds the duty-plan PDF inside PDF.js, e.g.
+  // js/pdfjs/web/viewer.html?file=/crewlink/temp/<name>.idp.pdf.
+  // First parse iframe/frame/embed sources; then fall back to locating the
+  // generated /crewlink/temp/*.pdf path anywhere in the returned HTML.
   for(const tag of html.matchAll(/<(?:iframe|frame|embed)\b[^>]*>/gi)){
     const src=attrs(tag[0]).src;if(!src)continue;
-    const path=new URL(src,REMOTE+'/crewlink/').searchParams.get('file');if(!path)continue;
-    const u=remoteUrl(path);if(u.pathname.startsWith('/crewlink/temp/')&&u.pathname.endsWith('.pdf'))return u;
+    let path=null;
+    try{path=new URL(src,REMOTE+'/crewlink/').searchParams.get('file');}catch(_){continue;}
+    if(!path)continue;
+    const u=remoteUrl(path);
+    if(u.pathname.startsWith('/crewlink/temp/')&&u.pathname.toLowerCase().endsWith('.pdf'))return u;
   }
-  throw new SafeError('CrewLink no generó un PDF. Comprueba que el periodo está publicado.');
+  const decoded=decode(html);
+  const direct=decoded.match(/\/crewlink\/temp\/[^\s"'<>]+\.pdf(?:[?#][^\s"'<>]*)?/i);
+  if(direct){
+    const u=remoteUrl(direct[0]);
+    if(u.pathname.startsWith('/crewlink/temp/')&&u.pathname.toLowerCase().endsWith('.pdf'))return u;
+  }
+  if(/crewlinkPassword/i.test(html))throw new SafeError('CrewLink devolvió de nuevo la pantalla de acceso. Revisa usuario y contraseña.');
+  throw new SafeError('CrewLink respondió al generar el roster, pero no devolvió la ruta del PDF.');
 }
 export async function limitedBody(response,max){
   if(!response.body)return new Uint8Array();
@@ -67,7 +81,7 @@ export async function crewlink(data,probe=false,transport=fetch){
   async function exchange(path,fields=null,pdf=false){
     let u=remoteUrl(path);
     for(let i=0;i<5;i++){
-      const headers=new Headers({'Accept':pdf?'application/pdf':'text/html','User-Agent':'RosterHome/0.5.0'}),cookie=jar.header(u);
+      const headers=new Headers({'Accept':pdf?'application/pdf':'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8','User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36'}),cookie=jar.header(u);
       if(cookie)headers.set('Cookie',cookie);
       if(fields)headers.set('Content-Type','application/x-www-form-urlencoded');
       const r=await transport(u.href,{method:fields?'POST':'GET',headers,body:fields?new URLSearchParams(fields).toString():undefined,redirect:'manual',signal:controller.signal});
@@ -107,7 +121,7 @@ export default {
   async fetch(request,env){
     const u=new URL(request.url);
     if(!u.pathname.startsWith('/api/'))return env.ASSETS.fetch(request);
-    if(u.pathname==='/api/crewlink/status'&&request.method==='GET')return json({available:true,mode:'cloud',configured:typeof env.ROSTERHOME_ACCESS_KEY==='string'&&env.ROSTERHOME_ACCESS_KEY.length>=32,version:'0.5.0'});
+    if(u.pathname==='/api/crewlink/status'&&request.method==='GET')return json({available:true,mode:'cloud',configured:typeof env.ROSTERHOME_ACCESS_KEY==='string'&&env.ROSTERHOME_ACCESS_KEY.length>=32,version:'0.5.1'});
     if(!['/api/crewlink/probe','/api/crewlink/sync'].includes(u.pathname))return json({error:'Ruta no encontrada.'},404);
     if(request.method!=='POST')return json({error:'Método no permitido.'},405);
     if(u.protocol!=='https:'||request.headers.get('Origin')!==u.origin)return json({error:'Origen no permitido.'},403);
