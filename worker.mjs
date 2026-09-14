@@ -12,27 +12,91 @@ function attrs(tag){return Object.fromEntries([...tag.matchAll(/([\w:-]+)\s*=\s*
 export function forms(html){
   return [...html.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form\s*>/gi)].map(m=>({action:attrs(m[1]).action||'clApp',fields:Object.fromEntries([...m[2].matchAll(/<input\b[^>]*>/gi)].map(x=>attrs(x[0])).filter(a=>a.name).map(a=>[a.name,a.value||'']))}));
 }
+function diagnosticSummary(html,username=''){
+  let normalized=decode(String(html||'')).replace(/\\\//g,'/');
+  const redact=(value)=>{
+    let out=String(value||'');
+    if(username){
+      const esc=username.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+      out=out.replace(new RegExp(esc,'gi'),'[USER]');
+    }
+    out=out
+      .replace(/(crewlinkPassword(?:%3D|=))[^^&\s"'<>]*/gi,'$1[REDACTED]')
+      .replace(/(crewlinkUserName(?:%3D|=))[^^&\s"'<>]*/gi,'$1[USER]')
+      .replace(/(password\s*[:=]\s*)[^&\s"'<>]+/gi,'$1[REDACTED]');
+    return out;
+  };
+  normalized=redact(normalized);
+
+  const formInfo=forms(normalized).slice(0,6).map(f=>{
+    let action='';
+    try{action=new URL(f.action,REMOTE+'/crewlink/').pathname;}catch{action=String(f.action||'').split('?')[0];}
+    return `${action||'-'}[${Object.keys(f.fields).slice(0,12).join('|')||'-'}]`;
+  });
+  const hrefs=[...normalized.matchAll(/\b(?:href|src)\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/gi)]
+    .map(m=>m[1]||m[2]||m[3]||'')
+    .filter(Boolean)
+    .slice(0,12)
+    .map(v=>{
+      try{const u=new URL(v,REMOTE+'/crewlink/');return u.pathname+(u.searchParams.has('crewlinkOperation')?`?crewlinkOperation=${u.searchParams.get('crewlinkOperation')}`:'');}
+      catch{return String(v).split('?')[0].slice(0,120);}
+    });
+  const redirects=[...normalized.matchAll(/(?:document|window)?\.?location(?:\.href)?\s*=\s*["']([^"']+)["']/gi)]
+    .map(m=>m[1]).slice(0,6).map(v=>String(v).split('?')[0].slice(0,120));
+
+  const text=redact(normalized
+    .replace(/<!--[\s\S]*?-->/g,' ')
+    .replace(/<script\b[\s\S]*?<\/script\s*>/gi,' ')
+    .replace(/<style\b[\s\S]*?<\/style\s*>/gi,' ')
+    .replace(/<[^>]+>/g,' ')
+    .replace(/&nbsp;/gi,' ')
+    .replace(/\s+/g,' ')
+    .trim()).slice(0,900);
+
+  return {
+    len:String(html||'').length,
+    text:text||'-',
+    forms:formInfo.join(';')||'-',
+    refs:hrefs.join(';')||'-',
+    redirects:redirects.join(';')||'-'
+  };
+}
+
 export function pdfUrl(html){
-  // CrewLink currently embeds the duty-plan PDF inside PDF.js, e.g.
-  // js/pdfjs/web/viewer.html?file=/crewlink/temp/<name>.idp.pdf.
-  // First parse iframe/frame/embed sources; then fall back to locating the
-  // generated /crewlink/temp/*.pdf path anywhere in the returned HTML.
-  for(const tag of html.matchAll(/<(?:iframe|frame|embed)\b[^>]*>/gi)){
-    const src=attrs(tag[0]).src;if(!src)continue;
-    let path=null;
-    try{path=new URL(src,REMOTE+'/crewlink/').searchParams.get('file');}catch(_){continue;}
-    if(!path)continue;
-    const u=remoteUrl(path);
-    if(u.pathname.startsWith('/crewlink/temp/')&&u.pathname.toLowerCase().endsWith('.pdf'))return u;
+  const normalized=decode(html).replace(/\\\//g,'/');
+
+  // Formato tradicional: PDF.js dentro de iframe/frame/embed.
+  for(const tag of normalized.matchAll(/<(?:iframe|frame|embed)\b[^>]*>/gi)){
+    const src=attrs(tag[0]).src;
+    if(!src)continue;
+    try{
+      const path=new URL(src,REMOTE+'/crewlink/').searchParams.get('file');
+      if(path){
+        const u=remoteUrl(path);
+        if(u.pathname.startsWith('/crewlink/temp/')&&u.pathname.toLowerCase().endsWith('.pdf'))return u;
+      }
+    }catch{}
   }
-  const decoded=decode(html);
-  const direct=decoded.match(/\/crewlink\/temp\/[^\s"'<>]+\.pdf(?:[?#][^\s"'<>]*)?/i);
-  if(direct){
-    const u=remoteUrl(direct[0]);
-    if(u.pathname.startsWith('/crewlink/temp/')&&u.pathname.toLowerCase().endsWith('.pdf'))return u;
+
+  // CrewLink puede devolver directamente la ruta temporal al PDF en el HTML.
+  for(const match of normalized.matchAll(/\/crewlink\/temp\/[^\"'<>\\\s]+\.pdf(?:[?#][^\"'<>\\\s]*)?/gi)){
+    try{
+      const u=remoteUrl(match[0]);
+      if(u.pathname.startsWith('/crewlink/temp/')&&u.pathname.toLowerCase().endsWith('.pdf'))return u;
+    }catch{}
   }
-  if(/crewlinkPassword/i.test(html))throw new SafeError('CrewLink devolvió de nuevo la pantalla de acceso. Revisa usuario y contraseña.');
-  throw new SafeError('CrewLink respondió al generar el roster, pero no devolvió la ruta del PDF.');
+
+  // O puede ocultarla dentro de un parámetro file= fuera de un iframe.
+  for(const match of normalized.matchAll(/[?&]file=([^\"'<>\\\s&]+)/gi)){
+    try{
+      const raw=decodeURIComponent(match[1]);
+      const u=remoteUrl(raw);
+      if(u.pathname.startsWith('/crewlink/temp/')&&u.pathname.toLowerCase().endsWith('.pdf'))return u;
+    }catch{}
+  }
+
+  if(/crewlinkPassword/i.test(normalized))throw new SafeError('CrewLink devolvió de nuevo la pantalla de acceso. Revisa usuario y contraseña.');
+  throw new SafeError('CrewLink respondió al generar el roster, pero no pude localizar el PDF.');
 }
 export async function limitedBody(response,max){
   if(!response.body)return new Uint8Array();
@@ -42,16 +106,48 @@ export async function limitedBody(response,max){
   const out=new Uint8Array(total);let offset=0;for(const c of chunks){out.set(c,offset);offset+=c.length;}return out;
 }
 // One jar per request; only the fixed CrewLink host is ever contacted.
+function setCookieValues(headers){
+  try{
+    if(typeof headers.getSetCookie==='function'){
+      const values=headers.getSetCookie();
+      if(Array.isArray(values)&&values.length)return values;
+    }
+  }catch{}
+  try{
+    if(typeof headers.getAll==='function'){
+      const values=headers.getAll('Set-Cookie');
+      if(Array.isArray(values)&&values.length)return values;
+    }
+  }catch{}
+  const combined=headers.get('Set-Cookie')||headers.get('set-cookie')||'';
+  if(!combined)return [];
+  // Split a combined Set-Cookie header only at cookie boundaries, not at the comma
+  // inside an Expires date.
+  return combined.split(/,(?=\s*[!#$%&'*+\-.^_`|~0-9A-Za-z]+\s*=)/g).map(v=>v.trim()).filter(Boolean);
+}
+function sessionId(html){
+  const m=String(html||'').match(/SESSION-ID\s*=\s*["']([^"']+)["']/i);
+  return m?m[1]:'';
+}
 export class CookieJar{
   constructor(){this.cookies=new Map();}
   receive(headers,address){
-    const values=headers.getSetCookie?.()||(headers.getAll?headers.getAll('Set-Cookie'):[]);
+    const values=setCookieValues(headers);
     for(const value of values){
-      const [first,...rest]=value.split(';'),pos=first.indexOf('=');if(pos<=0)continue;
+      const [first,...rest]=value.split(';'),pos=first.indexOf('=');
+      if(pos<=0)continue;
       const name=first.slice(0,pos).trim(),v=first.slice(pos+1).trim(),a={};
-      for(const part of rest){const i=part.indexOf('=');a[(i<0?part:part.slice(0,i)).trim().toLowerCase()]=i<0?true:part.slice(i+1).trim();}
-      if(a.domain){const domain=String(a.domain).replace(/^\./,'').toLowerCase();if(domain!==address.hostname&&!address.hostname.endsWith('.'+domain))continue;}
-      const path=typeof a.path==='string'&&a.path.startsWith('/')?a.path:address.pathname.slice(0,address.pathname.lastIndexOf('/')+1);
+      for(const part of rest){
+        const i=part.indexOf('=');
+        a[(i<0?part:part.slice(0,i)).trim().toLowerCase()]=i<0?true:part.slice(i+1).trim();
+      }
+      if(a.domain){
+        const domain=String(a.domain).replace(/^\./,'').toLowerCase();
+        if(domain!==address.hostname&&!address.hostname.endsWith('.'+domain))continue;
+      }
+      const slash=address.pathname.lastIndexOf('/');
+      const defaultPath=slash<=0?'/':address.pathname.slice(0,slash+1);
+      const path=typeof a.path==='string'&&a.path.startsWith('/')?a.path:defaultPath;
       const key=name+'|'+path;
       const age=a['max-age']===undefined?null:Number(a['max-age']);
       let expires=age!==null&&Number.isFinite(age)?Date.now()+age*1000:(a.expires?Date.parse(a.expires):Infinity);
@@ -60,7 +156,14 @@ export class CookieJar{
       this.cookies.set(key,{name,value:v,path,secure:!!a.secure,expires});
     }
   }
-  header(address){return [...this.cookies.values()].filter(c=>c.expires>Date.now()&&!c.secure&&(address.pathname===c.path||address.pathname.startsWith(c.path.endsWith('/')?c.path:c.path+'/'))).sort((a,b)=>b.path.length-a.path.length).map(c=>`${c.name}=${c.value}`).join('; ');}
+  header(address){
+    const secureOk=c=>!c.secure||address.protocol==='https:';
+    return [...this.cookies.values()]
+      .filter(c=>c.expires>Date.now()&&secureOk(c)&&(address.pathname===c.path||address.pathname.startsWith(c.path.endsWith('/')?c.path:c.path+'/')))
+      .sort((a,b)=>b.path.length-a.path.length)
+      .map(c=>`${c.name}=${c.value}`).join('; ');
+  }
+  names(){return [...new Set([...this.cookies.values()].map(c=>c.name))].sort();}
 }
 function dateValue(value){
   if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))throw new SafeError('Fecha inválida.');
@@ -78,10 +181,18 @@ export async function crewlink(data,probe=false,transport=fetch){
   if(!probe)validate(data);
   const jar=new CookieJar(),controller=new AbortController();
   const timeout=setTimeout(()=>controller.abort(),60000);
-  async function exchange(path,fields=null,pdf=false){
+  async function exchange(path,fields=null,pdf=false,referer=null){
     let u=remoteUrl(path);
     for(let i=0;i<5;i++){
-      const headers=new Headers({'Accept':pdf?'application/pdf':'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8','User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36'}),cookie=jar.header(u);
+      const headers=new Headers({
+        'Accept':pdf?'*/*':'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language':'es-ES,es;q=0.9,en;q=0.8',
+        'Cache-Control':'max-age=0',
+        'Upgrade-Insecure-Requests':'1',
+        'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36'
+      }),cookie=jar.header(u);
+      if(referer)headers.set('Referer',remoteUrl(referer).href);
+      if(fields)headers.set('Origin',REMOTE);
       if(cookie)headers.set('Cookie',cookie);
       if(fields)headers.set('Content-Type','application/x-www-form-urlencoded');
       const r=await transport(u.href,{method:fields?'POST':'GET',headers,body:fields?new URLSearchParams(fields).toString():undefined,redirect:'manual',signal:controller.signal});
@@ -92,21 +203,78 @@ export async function crewlink(data,probe=false,transport=fetch){
       }
       if(!r.ok){await r.body?.cancel();throw new SafeError(`CrewLink respondió HTTP ${r.status}.`);}
       const bytes=await limitedBody(r,pdf?MAX_PDF:MAX_HTML);
-      return pdf?bytes:new TextDecoder().decode(bytes);
+      return pdf?bytes:new TextDecoder('iso-8859-1').decode(bytes);
     }
     throw new SafeError('Demasiadas redirecciones de CrewLink.');
   }
   try{
-    const landing=await exchange(START),login=forms(landing).find(f=>'crewlinkPassword' in f.fields);
-    if(!login)throw new SafeError('El portal responde, pero no se reconoce el formulario de acceso.');
-    if(probe)return {ok:true,message:'Cloudflare alcanza CrewLink y reconoce el formulario de acceso. No se han enviado credenciales.'};
-    const loginFields=Object.fromEntries(['crewlinkService','crewlinkOperation','crewlinkSourcePage'].filter(k=>k in login.fields).map(k=>[k,login.fields[k]]));
-    await exchange(login.action,{...loginFields,crewlinkUserName:data.username,crewlinkPassword:data.password});
-    const page=await exchange('clApp?crewlinkService=individualDutyPlan&crewlinkOperation=default&crewlinkSourcePage=spCrew');
+    if(probe){
+      const landing=await exchange(START),login=forms(landing).find(f=>'crewlinkPassword' in f.fields);
+      if(!login)throw new SafeError('El portal responde, pero no se reconoce el formulario de acceso.');
+      return {ok:true,message:'Cloudflare alcanza CrewLink y reconoce el formulario de acceso. No se han enviado credenciales.'};
+    }
+
+    // Bootstrap de sesión: el HAR empieza en el POST de login, pero su Referer
+    // demuestra que el navegador visitó antes crewlink.jsp?...&resetSession=Y.
+    // En CrewLink legacy esa navegación inicializa estado server-side ligado al
+    // JSESSIONID; hacer el POST directamente autentica, pero deja incompleto el
+    // contexto usado después por Individual Duty Plan.
+    const landing=await exchange(START,null,false,null);
+    const loginForm=forms(landing).find(f=>'crewlinkPassword' in f.fields);
+    if(!loginForm)throw new SafeError('CrewLink responde, pero no se reconoce el formulario de acceso.');
+
+    const loginFields={
+      crewlinkService:'crewlinkForCrew',
+      crewlinkOperation:'loadMainFrameSet',
+      crewlinkSourcePage:'spStartup',
+      crewlinkUserName:data.username,
+      crewlinkPassword:data.password
+    };
+    const loginPage=await exchange(loginForm.action||'clApp',loginFields,false,START);
+    const loginSession=sessionId(loginPage), loginCookies=jar.names();
+    if(/crewlinkPassword/i.test(loginPage))throw new SafeError('CrewLink devolvió de nuevo la pantalla de acceso. Revisa usuario y contraseña.');
+
+    // El navegador carga estas páginas del frameset inmediatamente después del login.
+    // Algunas instalaciones antiguas de CrewLink mantienen estado en ese contexto.
+    const crewHome='clApp?crewlinkService=crewlinkForCrew&crewlinkOperation=default';
+    await exchange(`HeaderPage.jsp?user=${encodeURIComponent(data.username)}`,null,false,'clApp');
+    await exchange(crewHome,null,false,'clApp');
+    await exchange('MessagePage.jsp',null,false,'clApp');
+    await exchange('ResultFrame.html',null,false,'clApp');
+    await exchange('Status.html',null,false,'clApp');
+    await exchange('Info.html',null,false,'clApp');
+    await exchange('Clock.html',null,false,'clApp');
+
+    const dutyPage='clApp?crewlinkService=individualDutyPlan&crewlinkOperation=default&crewlinkSourcePage=spCrew';
+    const page=await exchange(dutyPage,null,false,crewHome);
+    const dutySession=sessionId(page), dutyCookies=jar.names();
     const form=forms(page).find(f=>f.fields.crewlinkOperation==='makeReport');
     if(!form)throw new SafeError('No se pudo acceder al roster. Revisa el login o los mensajes del portal.');
-    const report=await exchange(form.action,{crewlinkService:'individualDutyPlan',crewlinkOperation:'makeReport',buddyName:'',beginDate:dateForm(data.start),endDate:dateForm(data.end)});
-    const bytes=await exchange(pdfUrl(report).href,null,true);
+
+    // El HAR muestra exactamente estos cinco campos en el POST makeReport.
+    const reportFields={
+      crewlinkService:'individualDutyPlan',
+      crewlinkOperation:'makeReport',
+      buddyName:'',
+      beginDate:dateForm(data.start),
+      endDate:dateForm(data.end)
+    };
+    let report=await exchange('clApp',reportFields,false,dutyPage);
+    let pdf;
+    try{pdf=pdfUrl(report);}catch{
+      // Un único reintento después de volver a abrir la pantalla del IDP. Evita
+      // reutilizar una respuesta intermedia de CrewLink como si fuera el informe.
+      const refreshed=await exchange(dutyPage,null,false,crewHome);
+      if(!forms(refreshed).some(f=>f.fields.crewlinkOperation==='makeReport'))throw new SafeError('CrewLink perdió el contexto del roster antes de generar el PDF.');
+      report=await exchange('clApp',reportFields,false,dutyPage);
+      try{pdf=pdfUrl(report);}catch{
+        const d=diagnosticSummary(report,data.username);
+        throw new SafeError(`CrewLink devolvió una página inesperada tras generar el roster. DIAG len=${d.len}; text=${JSON.stringify(d.text)}; forms=${JSON.stringify(d.forms)}; refs=${JSON.stringify(d.refs)}; redirects=${JSON.stringify(d.redirects)}; cookiesBootstrap=${JSON.stringify(jar.names())}; cookiesLogin=${JSON.stringify(loginCookies)}; cookiesDuty=${JSON.stringify(dutyCookies)}; sessionLogin=${loginSession?'yes':'no'}; sessionDuty=${dutySession?'yes':'no'}; sameSession=${loginSession&&dutySession?String(loginSession===dutySession):'unknown'}.`);
+      }
+    }
+
+    const viewerRef=`js/pdfjs/web/viewer.html?file=${pdf.pathname}`;
+    const bytes=await exchange(pdf.href,null,true,viewerRef);
     if(new TextDecoder().decode(bytes.slice(0,5))!=='%PDF-')throw new SafeError('La respuesta no es un PDF; puede haber caducado la sesión.');
     return bytes;
   }finally{clearTimeout(timeout);jar.cookies.clear();if(data)data.password='';}
@@ -121,7 +289,7 @@ export default {
   async fetch(request,env){
     const u=new URL(request.url);
     if(!u.pathname.startsWith('/api/'))return env.ASSETS.fetch(request);
-    if(u.pathname==='/api/crewlink/status'&&request.method==='GET')return json({available:true,mode:'cloud',configured:typeof env.ROSTERHOME_ACCESS_KEY==='string'&&env.ROSTERHOME_ACCESS_KEY.length>=32,version:'0.5.1'});
+    if(u.pathname==='/api/crewlink/status'&&request.method==='GET')return json({available:true,mode:'cloud',configured:typeof env.ROSTERHOME_ACCESS_KEY==='string'&&env.ROSTERHOME_ACCESS_KEY.length>=32,version:'0.5.7'});
     if(!['/api/crewlink/probe','/api/crewlink/sync'].includes(u.pathname))return json({error:'Ruta no encontrada.'},404);
     if(request.method!=='POST')return json({error:'Método no permitido.'},405);
     if(u.protocol!=='https:'||request.headers.get('Origin')!==u.origin)return json({error:'Origen no permitido.'},403);

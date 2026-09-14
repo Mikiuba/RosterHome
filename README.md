@@ -1,4 +1,4 @@
-# RosterHome v0.5.6 — Cloudflare + GitHub
+# RosterHome v0.5.7 — Cloudflare + GitHub
 
 Actualización manual desde CrewLink, para usar desde navegador e iPhone sin mantener encendido el ordenador. Esta entrega está preparada para desplegar; todavía no está publicada ni se ha verificado la conexión desde la red de Cloudflare.
 
@@ -61,3 +61,13 @@ Pendiente: despliegue real con Wrangler, prueba de acceso Cloudflare → CrewLin
 - [Archivos estáticos y binding ASSETS](https://developers.cloudflare.com/workers/static-assets/binding/)
 - [Puertos personalizados](https://developers.cloudflare.com/workers/configuration/compatibility-flags/#allow-specifying-a-custom-port-when-making-a-subrequest-with-the-fetch-api)
 - [Límites del plan Free](https://developers.cloudflare.com/workers/platform/limits/)
+
+
+## v0.5.7 — CrewLink session bootstrap fix
+
+The successful browser HAR shows that the login POST is referred from
+`crewlink.jsp?crewlinkOperation=crewlinkForCrew&resetSession=Y`.
+v0.5.7 now performs that GET in the same cookie jar before login, then replays
+the browser sequence and the exact 5-field `makeReport` POST. This addresses
+the server-side `Individual Duty Plan Internal processing error` seen when
+authentication worked but the report context was incomplete.
