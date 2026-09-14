@@ -106,16 +106,48 @@ export async function limitedBody(response,max){
   const out=new Uint8Array(total);let offset=0;for(const c of chunks){out.set(c,offset);offset+=c.length;}return out;
 }
 // One jar per request; only the fixed CrewLink host is ever contacted.
+function setCookieValues(headers){
+  try{
+    if(typeof headers.getSetCookie==='function'){
+      const values=headers.getSetCookie();
+      if(Array.isArray(values)&&values.length)return values;
+    }
+  }catch{}
+  try{
+    if(typeof headers.getAll==='function'){
+      const values=headers.getAll('Set-Cookie');
+      if(Array.isArray(values)&&values.length)return values;
+    }
+  }catch{}
+  const combined=headers.get('Set-Cookie')||headers.get('set-cookie')||'';
+  if(!combined)return [];
+  // Split a combined Set-Cookie header only at cookie boundaries, not at the comma
+  // inside an Expires date.
+  return combined.split(/,(?=\s*[!#$%&'*+\-.^_`|~0-9A-Za-z]+\s*=)/g).map(v=>v.trim()).filter(Boolean);
+}
+function sessionId(html){
+  const m=String(html||'').match(/SESSION-ID\s*=\s*["']([^"']+)["']/i);
+  return m?m[1]:'';
+}
 export class CookieJar{
   constructor(){this.cookies=new Map();}
   receive(headers,address){
-    const values=headers.getSetCookie?.()||(headers.getAll?headers.getAll('Set-Cookie'):[]);
+    const values=setCookieValues(headers);
     for(const value of values){
-      const [first,...rest]=value.split(';'),pos=first.indexOf('=');if(pos<=0)continue;
+      const [first,...rest]=value.split(';'),pos=first.indexOf('=');
+      if(pos<=0)continue;
       const name=first.slice(0,pos).trim(),v=first.slice(pos+1).trim(),a={};
-      for(const part of rest){const i=part.indexOf('=');a[(i<0?part:part.slice(0,i)).trim().toLowerCase()]=i<0?true:part.slice(i+1).trim();}
-      if(a.domain){const domain=String(a.domain).replace(/^\./,'').toLowerCase();if(domain!==address.hostname&&!address.hostname.endsWith('.'+domain))continue;}
-      const path=typeof a.path==='string'&&a.path.startsWith('/')?a.path:address.pathname.slice(0,address.pathname.lastIndexOf('/')+1);
+      for(const part of rest){
+        const i=part.indexOf('=');
+        a[(i<0?part:part.slice(0,i)).trim().toLowerCase()]=i<0?true:part.slice(i+1).trim();
+      }
+      if(a.domain){
+        const domain=String(a.domain).replace(/^\./,'').toLowerCase();
+        if(domain!==address.hostname&&!address.hostname.endsWith('.'+domain))continue;
+      }
+      const slash=address.pathname.lastIndexOf('/');
+      const defaultPath=slash<=0?'/':address.pathname.slice(0,slash+1);
+      const path=typeof a.path==='string'&&a.path.startsWith('/')?a.path:defaultPath;
       const key=name+'|'+path;
       const age=a['max-age']===undefined?null:Number(a['max-age']);
       let expires=age!==null&&Number.isFinite(age)?Date.now()+age*1000:(a.expires?Date.parse(a.expires):Infinity);
@@ -124,7 +156,14 @@ export class CookieJar{
       this.cookies.set(key,{name,value:v,path,secure:!!a.secure,expires});
     }
   }
-  header(address){return [...this.cookies.values()].filter(c=>c.expires>Date.now()&&!c.secure&&(address.pathname===c.path||address.pathname.startsWith(c.path.endsWith('/')?c.path:c.path+'/'))).sort((a,b)=>b.path.length-a.path.length).map(c=>`${c.name}=${c.value}`).join('; ');}
+  header(address){
+    const secureOk=c=>!c.secure||address.protocol==='https:';
+    return [...this.cookies.values()]
+      .filter(c=>c.expires>Date.now()&&secureOk(c)&&(address.pathname===c.path||address.pathname.startsWith(c.path.endsWith('/')?c.path:c.path+'/')))
+      .sort((a,b)=>b.path.length-a.path.length)
+      .map(c=>`${c.name}=${c.value}`).join('; ');
+  }
+  names(){return [...new Set([...this.cookies.values()].map(c=>c.name))].sort();}
 }
 function dateValue(value){
   if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))throw new SafeError('Fecha inválida.');
@@ -186,6 +225,7 @@ export async function crewlink(data,probe=false,transport=fetch){
       crewlinkPassword:data.password
     };
     const loginPage=await exchange('clApp',loginFields,false,START);
+    const loginSession=sessionId(loginPage), loginCookies=jar.names();
     if(/crewlinkPassword/i.test(loginPage))throw new SafeError('CrewLink devolvió de nuevo la pantalla de acceso. Revisa usuario y contraseña.');
 
     // El navegador carga estas páginas del frameset inmediatamente después del login.
@@ -201,6 +241,7 @@ export async function crewlink(data,probe=false,transport=fetch){
 
     const dutyPage='clApp?crewlinkService=individualDutyPlan&crewlinkOperation=default&crewlinkSourcePage=spCrew';
     const page=await exchange(dutyPage,null,false,crewHome);
+    const dutySession=sessionId(page), dutyCookies=jar.names();
     const form=forms(page).find(f=>f.fields.crewlinkOperation==='makeReport');
     if(!form)throw new SafeError('No se pudo acceder al roster. Revisa el login o los mensajes del portal.');
 
@@ -222,7 +263,7 @@ export async function crewlink(data,probe=false,transport=fetch){
       report=await exchange('clApp',reportFields,false,dutyPage);
       try{pdf=pdfUrl(report);}catch{
         const d=diagnosticSummary(report,data.username);
-        throw new SafeError(`CrewLink devolvió una página inesperada tras generar el roster. DIAG len=${d.len}; text=${JSON.stringify(d.text)}; forms=${JSON.stringify(d.forms)}; refs=${JSON.stringify(d.refs)}; redirects=${JSON.stringify(d.redirects)}.`);
+        throw new SafeError(`CrewLink devolvió una página inesperada tras generar el roster. DIAG len=${d.len}; text=${JSON.stringify(d.text)}; forms=${JSON.stringify(d.forms)}; refs=${JSON.stringify(d.refs)}; redirects=${JSON.stringify(d.redirects)}; cookiesLogin=${JSON.stringify(loginCookies)}; cookiesDuty=${JSON.stringify(dutyCookies)}; sessionLogin=${loginSession?'yes':'no'}; sessionDuty=${dutySession?'yes':'no'}; sameSession=${loginSession&&dutySession?String(loginSession===dutySession):'unknown'}.`);
       }
     }
 
@@ -242,7 +283,7 @@ export default {
   async fetch(request,env){
     const u=new URL(request.url);
     if(!u.pathname.startsWith('/api/'))return env.ASSETS.fetch(request);
-    if(u.pathname==='/api/crewlink/status'&&request.method==='GET')return json({available:true,mode:'cloud',configured:typeof env.ROSTERHOME_ACCESS_KEY==='string'&&env.ROSTERHOME_ACCESS_KEY.length>=32,version:'0.5.5'});
+    if(u.pathname==='/api/crewlink/status'&&request.method==='GET')return json({available:true,mode:'cloud',configured:typeof env.ROSTERHOME_ACCESS_KEY==='string'&&env.ROSTERHOME_ACCESS_KEY.length>=32,version:'0.5.6'});
     if(!['/api/crewlink/probe','/api/crewlink/sync'].includes(u.pathname))return json({error:'Ruta no encontrada.'},404);
     if(request.method!=='POST')return json({error:'Método no permitido.'},405);
     if(u.protocol!=='https:'||request.headers.get('Origin')!==u.origin)return json({error:'Origen no permitido.'},403);
