@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "RosterHome CrewLink Bridge",
+  "version": "1.0.0",
+  "description": "Conecta RosterHome con CrewLink desde el Chrome local del usuario.",
+  "permissions": [
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://crewlink.corendonairlines.com/*",
+    "https://rosterhome.miguelesparciacastro.workers.dev/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://rosterhome.miguelesparciacastro.workers.dev/*"
+      ],
+      "js": [
+        "bridge.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_title": "RosterHome CrewLink Bridge"
+  }
+}

@@ -1,12 +1,16 @@
 {
   "name": "rosterhome-crewlink",
-  "version": "0.5.8",
+  "version": "0.6.0",
   "private": true,
   "scripts": {
     "build": "node scripts/build.cjs",
-    "test": "node --test tests/cloudflare.test.mjs",
+    "test": "node --test tests/*.test.mjs",
     "deploy": "npm run build && wrangler deploy"
   },
-  "devDependencies": { "wrangler": "^4.0.0" },
-  "engines": { "node": ">=22" }
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
 }
