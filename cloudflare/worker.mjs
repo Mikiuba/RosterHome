@@ -92,10 +92,12 @@ export async function crewlink(data,probe=false,transport=fetch){
   if(!probe)validate(data);
   const jar=new CookieJar(),controller=new AbortController();
   const timeout=setTimeout(()=>controller.abort(),60000);
-  async function exchange(path,fields=null,pdf=false){
+  async function exchange(path,fields=null,pdf=false,referer=null){
     let u=remoteUrl(path);
     for(let i=0;i<5;i++){
-      const headers=new Headers({'Accept':pdf?'application/pdf':'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8','User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36'}),cookie=jar.header(u);
+      const headers=new Headers({'Accept':pdf?'*/*':'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8','User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36'}),cookie=jar.header(u);
+      if(referer)headers.set('Referer',remoteUrl(referer).href);
+      if(fields)headers.set('Origin',REMOTE);
       if(cookie)headers.set('Cookie',cookie);
       if(fields)headers.set('Content-Type','application/x-www-form-urlencoded');
       const r=await transport(u.href,{method:fields?'POST':'GET',headers,body:fields?new URLSearchParams(fields).toString():undefined,redirect:'manual',signal:controller.signal});
@@ -115,12 +117,26 @@ export async function crewlink(data,probe=false,transport=fetch){
     if(!login)throw new SafeError('El portal responde, pero no se reconoce el formulario de acceso.');
     if(probe)return {ok:true,message:'Cloudflare alcanza CrewLink y reconoce el formulario de acceso. No se han enviado credenciales.'};
     const loginFields=Object.fromEntries(['crewlinkService','crewlinkOperation','crewlinkSourcePage'].filter(k=>k in login.fields).map(k=>[k,login.fields[k]]));
-    await exchange(login.action,{...loginFields,crewlinkUserName:data.username,crewlinkPassword:data.password});
-    const page=await exchange('clApp?crewlinkService=individualDutyPlan&crewlinkOperation=default&crewlinkSourcePage=spCrew');
+    await exchange(login.action,{...loginFields,crewlinkUserName:data.username,crewlinkPassword:data.password},false,START);
+
+    // El HAR real de CrewLink muestra esta navegación intermedia tras el login.
+    // Mantenerla es importante porque CrewLink conserva contexto de servicio en sesión.
+    const crewHome='clApp?crewlinkService=crewlinkForCrew&crewlinkOperation=default';
+    await exchange(crewHome,null,false,login.action);
+
+    const dutyPage='clApp?crewlinkService=individualDutyPlan&crewlinkOperation=default&crewlinkSourcePage=spCrew';
+    const page=await exchange(dutyPage,null,false,crewHome);
     const form=forms(page).find(f=>f.fields.crewlinkOperation==='makeReport');
     if(!form)throw new SafeError('No se pudo acceder al roster. Revisa el login o los mensajes del portal.');
-    const report=await exchange(form.action,{crewlinkService:'individualDutyPlan',crewlinkOperation:'makeReport',buddyName:'',beginDate:dateForm(data.start),endDate:dateForm(data.end)});
-    const bytes=await exchange(pdfUrl(report).href,null,true);
+    const reportFields={...form.fields,crewlinkService:'individualDutyPlan',crewlinkOperation:'makeReport',buddyName:'',beginDate:dateForm(data.start),endDate:dateForm(data.end)};
+    const report=await exchange(form.action,reportFields,false,dutyPage);
+    let pdf;
+    try{pdf=pdfUrl(report);}catch(err){
+      const flags=[`len=${report.length}`,`iframe=${/<iframe\b/i.test(report)?1:0}`,`viewer=${/viewer\.html/i.test(report)?1:0}`,`temp=${/\/crewlink\/temp\//i.test(report)?1:0}`,`login=${/crewlinkPassword/i.test(report)?1:0}`].join(',');
+      throw new SafeError(`CrewLink respondió al generar el roster, pero no pude localizar el PDF (${flags}).`);
+    }
+    const viewerRef=`js/pdfjs/web/viewer.html?file=${encodeURIComponent(pdf.pathname)}`;
+    const bytes=await exchange(pdf.href,null,true,viewerRef);
     if(new TextDecoder().decode(bytes.slice(0,5))!=='%PDF-')throw new SafeError('La respuesta no es un PDF; puede haber caducado la sesión.');
     return bytes;
   }finally{clearTimeout(timeout);jar.cookies.clear();if(data)data.password='';}
@@ -135,7 +151,7 @@ export default {
   async fetch(request,env){
     const u=new URL(request.url);
     if(!u.pathname.startsWith('/api/'))return env.ASSETS.fetch(request);
-    if(u.pathname==='/api/crewlink/status'&&request.method==='GET')return json({available:true,mode:'cloud',configured:typeof env.ROSTERHOME_ACCESS_KEY==='string'&&env.ROSTERHOME_ACCESS_KEY.length>=32,version:'0.5.2'});
+    if(u.pathname==='/api/crewlink/status'&&request.method==='GET')return json({available:true,mode:'cloud',configured:typeof env.ROSTERHOME_ACCESS_KEY==='string'&&env.ROSTERHOME_ACCESS_KEY.length>=32,version:'0.5.3'});
     if(!['/api/crewlink/probe','/api/crewlink/sync'].includes(u.pathname))return json({error:'Ruta no encontrada.'},404);
     if(request.method!=='POST')return json({error:'Método no permitido.'},405);
     if(u.protocol!=='https:'||request.headers.get('Origin')!==u.origin)return json({error:'Origen no permitido.'},403);

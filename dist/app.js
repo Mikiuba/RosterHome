@@ -1,0 +1,1047 @@
+const DEFAULT_STATE = {
+  people:[
+    {name:'Miguel', duties:[], source:null},
+    {name:'Nicole', duties:[], source:null}
+  ],
+  rules:{
+    homeTz:'Europe/Athens', sleepHours:8, quietLead:30, commuteOut:0, commuteHome:0,
+    longDuty:10, veryLongDuty:12, partialRecovery:6, fullRecovery:12,
+    lunchTime:'14:00', dinnerTime:'20:30', mealFlex:60
+  },
+  month:new Date().toISOString().slice(0,7),
+  calendarMode:'month',
+  calendarDensity:'simple',
+  focusDate:new Date().toISOString().slice(0,10)
+};
+
+let BOOT_LOCAL_RAW=null;
+try{BOOT_LOCAL_RAW=localStorage.getItem('rosterhome-state');}catch(_){ }
+const BOOT_HAD_LOCAL_STATE = !!BOOT_LOCAL_RAW;
+const STATE_SCHEMA_VERSION = 9;
+let durableStorageReady = false;
+let state = loadState();
+let renderedEvents = new Map();
+let eventCounter = 0;
+let calendarRenderFrame = 0;
+
+function dutyIdentity(d){
+  if(!d) return '';
+  if(d.kind==='status') return `status|${d.date||''}|${d.status||''}`;
+  // Same report time + same route/base is the same roster duty even if a later
+  // import changes C/O or metadata. Keep the latest/richest copy.
+  return `duty|${d.checkIn||''}|${d.route||d.base||''}`;
+}
+function dutyRichness(d){
+  if(!d) return 0;
+  return [d.checkout,d.route,d.type,d.dt,d.fdp,d.ft].filter(Boolean).length + ((d.flights||[]).length*2);
+}
+function dedupeDuties(list){
+  const map=new Map();
+  for(const d of (list||[])){
+    const k=dutyIdentity(d); if(!k) continue;
+    const prev=map.get(k);
+    if(!prev || dutyRichness(d)>=dutyRichness(prev)) map.set(k,d);
+  }
+  return [...map.values()].sort((a,b)=>(a.checkIn||a.date||'').localeCompare(b.checkIn||b.date||''));
+}
+
+function clone(x){ return JSON.parse(JSON.stringify(x)); }
+function normalizeState(saved={}){
+  const base=clone(DEFAULT_STATE);
+  const people=[0,1].map(i=>{
+    const person={...base.people[i], ...(saved.people?.[i]||{})};
+    person.coverage=Array.isArray(person.coverage)?person.coverage:[];
+    person.duties=dedupeDuties((person.duties||[]).map(d=>RosterParser.repairLegacyDuty(d)));
+    return person;
+  });
+  const rules={...base.rules, ...(saved.rules||{})};
+  const month=saved.month || base.month;
+  return {
+    ...base,
+    ...saved,
+    schemaVersion:STATE_SCHEMA_VERSION,
+    people,
+    rules,
+    month,
+    calendarMode:['month','week','day'].includes(saved.calendarMode)?saved.calendarMode:'month',
+    calendarDensity:['simple','full'].includes(saved.calendarDensity)?saved.calendarDensity:'simple',
+    focusDate:saved.focusDate || `${month}-01`
+  };
+}
+function loadState(){
+  try{return normalizeState(JSON.parse(localStorage.getItem('rosterhome-state')||'{}'));}
+  catch(e){ return normalizeState({}); }
+}
+function saveState(options={}){
+  state.schemaVersion=STATE_SCHEMA_VERSION;
+  if(durableStorageReady && !options.preserveTimestamp) state.lastSavedAt=new Date().toISOString();
+  try{localStorage.setItem('rosterhome-state', JSON.stringify(state));}catch(err){console.warn('[RosterHome] localStorage no disponible',err);}
+  if(durableStorageReady && window.RosterStorage) window.RosterStorage.saveState(state,{immediate:!!options.immediate});
+}
+async function initializeDurableStorage(){
+  if(!window.RosterStorage){
+    window.dispatchEvent(new CustomEvent('rh-storage-ready',{detail:{restored:false,fallback:true}}));
+    return {restored:false,fallback:true};
+  }
+  let dbState=null;
+  try{dbState=await window.RosterStorage.loadState();}catch(_){ }
+  let restored=false;
+  if(dbState){
+    const localTs=state.lastSavedAt?Date.parse(state.lastSavedAt):0;
+    const dbTs=dbState.lastSavedAt?Date.parse(dbState.lastSavedAt):0;
+    // If Safari cleared localStorage, IndexedDB is authoritative. If both exist,
+    // prefer the newest durable snapshot rather than silently replacing newer edits.
+    if(!BOOT_HAD_LOCAL_STATE || (dbTs && dbTs>localTs)){
+      state=normalizeState(dbState);
+      restored=true;
+    }
+  }
+  durableStorageReady=true;
+  state.storageMigratedAt=state.storageMigratedAt||new Date().toISOString();
+  saveState({immediate:true});
+  // Persistence is an enhancement, never a prerequisite for using the app.
+  try{await Promise.race([window.RosterStorage.requestPersistence(),new Promise(r=>setTimeout(()=>r(null),1800))]);}catch(_){ }
+  if(restored){
+    try{syncInputs();}catch(_){ }
+    try{renderCalendar();}catch(_){ }
+    try{if(document.getElementById('summaryView')?.classList.contains('active'))renderSummary();}catch(_){ }
+    window.dispatchEvent(new CustomEvent('rh-storage-restored'));
+  }
+  window.dispatchEvent(new CustomEvent('rh-storage-ready',{detail:{restored}}));
+  return {restored};
+}
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function ms(h){ return h*3600000; }
+function minMs(m){ return m*60000; }
+
+if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const formatterCache=new Map();
+function cachedFormatter(locale,opts){
+  const key=locale+'|'+JSON.stringify(opts);
+  let f=formatterCache.get(key); if(!f){f=new Intl.DateTimeFormat(locale,opts);formatterCache.set(key,f);} return f;
+}
+function fmt(date, opts={}){
+  return cachedFormatter('es-ES',{timeZone:state.rules.homeTz,...opts}).format(new Date(date));
+}
+function dayKey(date){
+  const p=cachedFormatter('en-CA',{timeZone:state.rules.homeTz,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(date));
+  const o=Object.fromEntries(p.map(x=>[x.type,x.value])); return `${o.year}-${o.month}-${o.day}`;
+}
+function hourLocal(date){ return Number(cachedFormatter('en-GB',{timeZone:state.rules.homeTz,hour:'2-digit',hour12:false}).format(new Date(date))); }
+function timeLocal(date){ return fmt(date,{hour:'2-digit',minute:'2-digit',hour12:false}); }
+function monthLabel(ym){ const [y,m]=ym.split('-').map(Number); return cachedFormatter('es-ES',{month:'long',year:'numeric'}).format(new Date(y,m-1,1)); }
+function localDateTime(date){ return fmt(date,{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hour12:false}); }
+function utcDateTime(date){ return cachedFormatter('es-ES',{timeZone:'UTC',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(date))+' UTC'; }
+function hhmmDisplay(v){ const s=String(v||'').replace(/\D/g,'').slice(0,4).padStart(4,'0'); return `${s.slice(0,2)}:${s.slice(2,4)}`; }
+function sourceDateDisplay(key){ if(!key)return '—'; const [y,m,d]=String(key).split('-'); return `${d}/${m}/${y}`; }
+function sourceRosterTime(d,which){
+  const isIn=which==='in';
+  const date=isIn?d.sourceCheckInDate:d.sourceCheckOutDate;
+  const time=isIn?d.sourceCheckInTime:d.sourceCheckOutTime;
+  const airport=isIn?d.sourceCheckInAirport:d.sourceCheckOutAirport;
+  if(!time){ const instant=isIn?d.checkIn:d.checkout; return instant?utcDateTime(instant):'—'; }
+  if(d.timeBasis==='local_event') return `${sourceDateDisplay(date)} ${hhmmDisplay(time)} ${airport||''} · hora local del aeropuerto`;
+  return `${sourceDateDisplay(date)} ${hhmmDisplay(time)} UTC`;
+}
+
+function tzOffsetMillis(date, timeZone){
+  const parts = cachedFormatter('en-US',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(date);
+  const o=Object.fromEntries(parts.map(p=>[p.type,p.value]));
+  const asUTC=Date.UTC(+o.year,+o.month-1,+o.day,+o.hour,+o.minute,+o.second); return asUTC-date.getTime();
+}
+function zonedToUtc(y,m,d,h,min,timeZone){
+  let guess=new Date(Date.UTC(y,m-1,d,h,min,0));
+  let off=tzOffsetMillis(guess,timeZone); guess=new Date(guess.getTime()-off);
+  const off2=tzOffsetMillis(guess,timeZone); if(off2!==off) guess=new Date(Date.UTC(y,m-1,d,h,min,0)-off2); return guess;
+}
+function utcForLocalDayTime(key, hhmm){ const [y,m,d]=key.split('-').map(Number), [h,mi]=hhmm.split(':').map(Number); return zonedToUtc(y,m,d,h,mi,state.rules.homeTz); }
+
+function addDaysKey(key,days){
+  const [y,m,d]=key.split('-').map(Number); const x=new Date(Date.UTC(y,m-1,d+days));
+  return x.toISOString().slice(0,10);
+}
+function mondayKey(key){
+  const [y,m,d]=key.split('-').map(Number); const x=new Date(Date.UTC(y,m-1,d));
+  const delta=(x.getUTCDay()+6)%7; return addDaysKey(key,-delta);
+}
+function localDayLabel(key, opts={weekday:'long',day:'numeric',month:'long'}){
+  return fmt(utcForLocalDayTime(key,'12:00'),opts);
+}
+function shortWeekTitle(startKey){
+  const endKey=addDaysKey(startKey,6);
+  const a=localDayLabel(startKey,{day:'numeric',month:'short'});
+  const b=localDayLabel(endKey,{day:'numeric',month:'short',year:'numeric'});
+  return `${a} – ${b}`;
+}
+
+function dutyLabel(d){
+  if(d.kind==='status') return d.status;
+  const route=d.route || d.base || 'Duty'; return `${route} · ${timeLocal(d.checkIn)}–${d.checkout?timeLocal(d.checkout):'?'}`;
+}
+
+function recoveryForDuty(d){
+  if(d.kind!=='duty' || !d.checkout) return null;
+  let score=0; const reasons=[]; const hrs=Number(d.dutyHours||0), type=String(d.type||'').toUpperCase();
+  if(hrs>=state.rules.veryLongDuty){ score+=2; reasons.push(`duty muy largo (${hrs.toFixed(1)} h)`); }
+  else if(hrs>=state.rules.longDuty){ score+=1; reasons.push(`duty largo (${hrs.toFixed(1)} h)`); }
+  if(type.includes('NIGHT')){ score+=2; reasons.push('duty NIGHT'); }
+  else if(type.includes('EARLY')){ score+=1; reasons.push('duty EARLY'); }
+  else if(type.includes('LATE')){ score+=1; reasons.push('duty LATE'); }
+  const coH=hourLocal(d.checkout), ciH=hourLocal(d.checkIn);
+  if(coH>=0 && coH<5){ score+=2; reasons.push('C/O entre 00:00 y 05:00 local'); }
+  if(ciH>=0 && ciH<5){ score+=1; reasons.push('C/I entre 00:00 y 05:00 local'); }
+  if(score===0) return null;
+  const full=score>=3;
+  const start=new Date(new Date(d.checkout).getTime()+minMs(state.rules.commuteHome));
+  const dur=full?state.rules.fullRecovery:state.rules.partialRecovery;
+  return {start,end:new Date(start.getTime()+ms(dur)),level:full?'full':'partial',score,reasons};
+}
+function sleepForDuty(d){
+  if(d.kind!=='duty' || !d.checkIn) return null;
+  const wake=new Date(new Date(d.checkIn).getTime()-minMs(state.rules.commuteOut));
+  const start=new Date(wake.getTime()-ms(state.rules.sleepHours));
+  return {start,end:wake,quietStart:new Date(start.getTime()-minMs(state.rules.quietLead))};
+}
+
+function allDerived(){
+  const events=[];
+  state.people.forEach((p,pi)=>dedupeDuties(p.duties).forEach(d=>{
+    if(d.kind==='duty'){
+      events.push({kind:'duty',person:pi,start:new Date(d.checkIn),end:d.checkout?new Date(d.checkout):new Date(new Date(d.checkIn).getTime()+ms(8)),label:dutyLabel(d),raw:d});
+      const s=sleepForDuty(d);
+      if(s){
+        events.push({kind:'sleep',person:pi,start:s.start,end:s.end,label:`Sueño ${state.rules.sleepHours} h`,raw:d});
+        if(state.rules.quietLead>0) events.push({kind:'quiet',person:pi,start:s.quietStart,end:s.start,label:'Quiet hours',raw:d});
+      }
+      const r=recoveryForDuty(d);
+      if(r) events.push({kind:'recovery',person:pi,start:r.start,end:r.end,label:r.level==='full'?'Recovery completo':'Recovery parcial',level:r.level,reasons:r.reasons,score:r.score,raw:d});
+    }
+  }));
+  // Safety invariant: never present a sleep block as normal if it truly overlaps
+  // one of that person's duties. This should not happen in a coherent roster; if it
+  // does, make the conflict explicit instead of implying the person can sleep at work.
+  const dutyEvents=events.filter(x=>x.kind==='duty');
+  for(const sleep of events.filter(x=>x.kind==='sleep')){
+    const conflicts=dutyEvents.filter(d=>d.person===sleep.person && new Date(d.start)<new Date(sleep.end) && new Date(d.end)>new Date(sleep.start));
+    if(conflicts.length){ sleep.sleepConflict=true; sleep.conflictDuties=conflicts.map(x=>x.raw?.route||x.label||'Duty'); }
+  }
+
+  // Final rendering guard: identical derived blocks should never appear twice,
+  // even if old localStorage data contained duplicates from an earlier parser.
+  const seen=new Map();
+  for(const e of events){
+    const k=[e.kind,e.person,e.start?.toISOString?.()||'',e.end?.toISOString?.()||'',e.raw?.route||'',e.label||''].join('|');
+    seen.set(k,e);
+  }
+  return [...seen.values()];
+}
+
+function mergeIntervals(intervals){
+  const xs=intervals.filter(x=>x.end>x.start).sort((a,b)=>a.start-b.start); if(!xs.length) return [];
+  const out=[{start:new Date(xs[0].start),end:new Date(xs[0].end)}];
+  for(const x of xs.slice(1)){ const last=out[out.length-1]; if(x.start<=last.end){ if(x.end>last.end)last.end=new Date(x.end); } else out.push({start:new Date(x.start),end:new Date(x.end)}); }
+  return out;
+}
+function overlap(a,b,start,end){ const s=new Date(Math.max(a.start,start)), e=new Date(Math.min(a.end,end)); return e>s?{start:s,end:e}:null; }
+function coupleWindowForDay(key, derived){
+  if(!state.people[0].duties.length || !state.people[1].duties.length) return null;
+  const start=utcForLocalDayTime(key,'08:00'), end=utcForLocalDayTime(key,'23:00');
+  const blocks=derived.filter(e=>['duty','sleep'].includes(e.kind)).map(e=>overlap(e,{start,end},start,end)).filter(Boolean);
+  const merged=mergeIntervals(blocks); let cursor=start, best=null;
+  for(const b of merged){ if(b.start>cursor){ const gap={start:new Date(cursor),end:new Date(b.start)}; if(!best||gap.end-gap.start>best.end-best.start)best=gap; } if(b.end>cursor)cursor=b.end; }
+  if(cursor<end){const gap={start:new Date(cursor),end:new Date(end)}; if(!best||gap.end-gap.start>best.end-best.start)best=gap;}
+  return best && (best.end-best.start)>=ms(2) ? best : null;
+}
+
+function eventOverlapsDay(e,key){
+  if(!e.start || !e.end) return false;
+  const start=utcForLocalDayTime(key,'00:00');
+  const end=utcForLocalDayTime(addDaysKey(key,1),'00:00');
+  return e.start<end && e.end>start;
+}
+function eventsForDay(key, derived, includeQuiet=true){
+  const out=[];
+  state.people.forEach((p,pi)=>p.duties.filter(x=>x.kind==='status'&&x.date===key).forEach(x=>out.push({kind:'status',person:pi,label:x.status,raw:x,date:key})));
+  derived.filter(e=>eventOverlapsDay(e,key) && (includeQuiet || e.kind!=='quiet')).forEach(e=>out.push(e));
+  const cw=coupleWindowForDay(key,derived);
+  if(cw) out.push({kind:'couple',person:null,start:cw.start,end:cw.end,label:'Ventana juntos',date:key});
+  const order={status:0,quiet:1,sleep:2,duty:3,recovery:4,couple:5};
+  out.sort((a,b)=>{
+    const ta=a.start?+new Date(a.start):-Infinity, tb=b.start?+new Date(b.start):-Infinity;
+    if(ta!==tb) return ta-tb; return (order[a.kind]??9)-(order[b.kind]??9);
+  });
+  return out;
+}
+
+function registerEvent(e){ const id=`ev-${++eventCounter}`; renderedEvents.set(id,e); return id; }
+function eventClass(e){
+  if(e.kind==='duty'||e.kind==='status') return e.person===1?'p2':'';
+  if(e.kind==='sleep') return e.sleepConflict?'sleep conflict':'sleep';
+  if(e.kind==='quiet') return 'quiet';
+  if(e.kind==='recovery') return `recovery ${e.level==='full'?'full':''}`;
+  if(e.kind==='couple') return 'couple';
+  return '';
+}
+function personLaneClass(e){
+  return e.person===0?'owner-p0':e.person===1?'owner-p1':'owner-shared';
+}
+function eventTimeRange(e){
+  if(e.kind==='status') return 'Todo el día';
+  if(e.start&&e.end) return `${timeLocal(e.start)}–${timeLocal(e.end)}`;
+  return '';
+}
+function eventBlockTitle(e, compact=false){
+  const person=e.person==null?'':state.people[e.person].name;
+  const initial=person ? person.trim().charAt(0).toUpperCase() : '';
+  if(compact){
+    if(e.kind==='duty') return e.raw?.route||e.raw?.base||'Duty';
+    if(e.kind==='status') return e.label;
+    if(e.kind==='sleep') return `🌙 ${initial}`;
+    if(e.kind==='quiet') return `🔕 ${initial}`;
+    if(e.kind==='recovery') return `${e.level==='full'?'🔴':'🟡'} Rec · ${initial}`;
+    if(e.kind==='couple') return '❤️ Juntos';
+  }
+  if(e.kind==='duty') return `${person} · ${e.raw?.route||e.raw?.base||'Duty'}`;
+  if(e.kind==='status') return `${person} · ${e.label}`;
+  if(e.kind==='sleep') return e.sleepConflict?`⚠️ Sueño en conflicto · ${person}`:`🌙 Sueño · ${person}`;
+  if(e.kind==='quiet') return `🔕 Quiet · ${person}`;
+  if(e.kind==='recovery') return `${e.level==='full'?'🔴':'🟡'} Recovery · ${person}`;
+  if(e.kind==='couple') return '❤️ Tiempo juntos';
+  return e.label||'Evento';
+}
+function eventBlockMeta(e){
+  const when=eventTimeRange(e);
+  if(e.kind==='duty'){
+    const raw=e.raw||{}; const bits=[when];
+    if(raw.type&&raw.type!=='N/A') bits.push(raw.type);
+    if(state.calendarDensity==='full' && raw.dt) bits.push(`DT ${raw.dt}`);
+    return bits.filter(Boolean).join(' · ');
+  }
+  if(e.kind==='recovery') return `${when}${e.level==='full'?' · completo':' · parcial'}`;
+  if(e.kind==='couple') return `${when} · ${((e.end-e.start)/3600000).toFixed(1)} h`;
+  return when;
+}
+function eventText(e){
+  const meta=eventBlockMeta(e);
+  return `${eventBlockTitle(e)}${meta?' · '+meta:''}`;
+}
+function renderEventButton(e,extraClass='',context='month'){
+  const id=registerEvent(e);
+  return `<button type="button" class="event calendar-block ${eventClass(e)} ${personLaneClass(e)} ${extraClass}" data-event-id="${id}" aria-label="Ver detalle de ${esc(eventText(e))}"><span class="event-block-title">${esc(eventBlockTitle(e,context==='month'))}</span><span class="event-block-meta">${esc(eventBlockMeta(e))}</span></button>`;
+}
+
+function syncCalendarModeButtons(){
+  document.querySelectorAll('[data-calendar-mode]').forEach(b=>b.classList.toggle('active',b.dataset.calendarMode===state.calendarMode));
+}
+function syncCalendarDensityButtons(){
+  document.querySelectorAll('[data-calendar-density]').forEach(b=>b.classList.toggle('active',b.dataset.calendarDensity===state.calendarDensity));
+  const hint=$('clarityHint');
+  if(hint) hint.textContent=state.calendarDensity==='simple'?'Solo lo importante para planificar el día':'Muestra también Quiet hours y ventanas juntos';
+}
+function calendarVisibleEvents(events, mode){
+  if(state.calendarDensity==='full') return events;
+  const allowed=mode==='month' ? new Set(['status','duty','recovery']) : new Set(['status','duty','sleep','recovery']);
+  return events.filter(e=>allowed.has(e.kind));
+}
+function simpleDayInsight(key,derived){
+  if(state.calendarDensity!=='simple') return '';
+  const sleeps=derived.filter(e=>e.kind==='sleep'&&eventOverlapsDay(e,key));
+  const cw=coupleWindowForDay(key,derived);
+  const bits=[];
+  if(sleeps.length) bits.push(`<span class="insight-pill sleep-insight">🌙 ${sleeps.length>1?sleeps.length+' sueños':'sueño'}</span>`);
+  if(cw) bits.push(`<span class="insight-pill couple-insight">❤️ ${timeLocal(cw.start)}–${timeLocal(cw.end)}</span>`);
+  return bits.length?`<div class="simple-insights">${bits.join('')}</div>`:'';
+}
+function renderCalendar(){
+  window.__rhRenderVersion=(window.__rhRenderVersion||0)+1;
+  renderedEvents=new Map(); eventCounter=0;
+  if($('legendP1')) $('legendP1').textContent=state.people[0].name||'Perfil 1'; if($('legendP2')) $('legendP2').textContent=state.people[1].name||'Perfil 2';
+  if($('legendGuideP1')) $('legendGuideP1').textContent=state.people[0].name||'Perfil 1';
+  if($('legendGuideP2')) $('legendGuideP2').textContent=state.people[1].name||'Perfil 2';
+  syncCalendarModeButtons();
+  syncCalendarDensityButtons();
+  const derived=allDerived();
+  if(state.calendarMode==='week') renderWeekCalendar(derived);
+  else if(state.calendarMode==='day') renderDayCalendar(derived);
+  else renderMonthCalendar(derived);
+  const cal=$('calendar'); if(cal) cal.classList.remove('view-switching');
+}
+
+function queueCalendarRender(){
+  // v0.3.2.2: never disable pointer interaction while changing view.
+  // On iOS/PWA a delayed rAF could leave the calendar in a non-interactive
+  // state if the app was backgrounded mid-frame. Rendering synchronously here
+  // is cheap enough with the existing caches and is substantially more robust.
+  try{ syncCalendarModeButtons(); }catch(_){ }
+  try{ syncCalendarDensityButtons(); }catch(_){ }
+  const cal=$('calendar'); if(cal) cal.classList.remove('view-switching');
+  if(calendarRenderFrame){ try{cancelAnimationFrame(calendarRenderFrame);}catch(_){ } calendarRenderFrame=0; }
+  try{ renderCalendar(); }
+  catch(err){
+    console.error('[RosterHome] Error renderizando calendario',err);
+    if(cal) cal.classList.remove('view-switching');
+  }
+}
+
+function renderMonthCalendar(derived){
+  const [year,month]=state.month.split('-').map(Number); const first=new Date(year,month-1,1); const days=new Date(year,month,0).getDate(); const lead=(first.getDay()+6)%7;
+  $('monthTitle').textContent=monthLabel(state.month);
+  $('calendar').className='calendar month-view split-people';
+  const names=['L','M','X','J','V','S','D']; let html=names.map(x=>`<div class="dow">${x}</div>`).join('');
+  for(let i=0;i<lead;i++) html+='<div class="day other"></div>';
+  const todayKey=dayKey(new Date());
+  for(let d=1;d<=days;d++){
+    const key=`${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const ev=calendarVisibleEvents(eventsForDay(key,derived,false),'month');
+    const p0=ev.filter(e=>e.person===0), p1=ev.filter(e=>e.person===1), shared=ev.filter(e=>e.person==null);
+    html+=`<div class="day ${key===todayKey?'today':''}"><button type="button" class="daynum daynum-btn" data-open-day="${key}" aria-label="Abrir ${esc(localDayLabel(key))}">${d}</button>`;
+    html+='<div class="month-person-lanes">';
+    for(const [pi,list] of [[0,p0],[1,p1]]){
+      const max=4;
+      html+=`<div class="month-person-lane person-${pi}" aria-label="${esc(state.people[pi].name)}">`;
+      list.slice(0,max).forEach(e=>{ html+=renderEventButton(e,'month-person-event','month'); });
+      if(list.length>max) html+=`<button type="button" class="more-events lane-more" data-open-day="${key}">+${list.length-max}</button>`;
+      html+='</div>';
+    }
+    html+='</div>';
+    if(shared.length) html+=`<div class="shared-events">${shared.map(e=>renderEventButton(e,'shared-event','month')).join('')}</div>`;
+    html+=simpleDayInsight(key,derived);
+    html+='</div>';
+  }
+  $('calendar').innerHTML=html;
+}
+
+function renderWeekCalendar(derived){
+  const start=mondayKey(state.focusDate), todayKey=dayKey(new Date());
+  $('monthTitle').textContent=shortWeekTitle(start);
+  $('calendar').className='calendar week-view split-people';
+  let html='<div class="week-grid">';
+  for(let i=0;i<7;i++){
+    const key=addDaysKey(start,i); const ev=calendarVisibleEvents(eventsForDay(key,derived,true),'week');
+    const p0=ev.filter(e=>e.person===0), p1=ev.filter(e=>e.person===1), shared=ev.filter(e=>e.person==null);
+    const weekday=localDayLabel(key,{weekday:'short'}); const date=localDayLabel(key,{day:'numeric',month:'short'});
+    html+=`<section class="week-day ${key===todayKey?'today':''}"><button type="button" class="week-day-head" data-open-day="${key}"><span>${esc(weekday)}</span><b>${esc(date)}</b></button>`;
+    html+=`<div class="week-person-head"><span>${esc(state.people[0].name)}</span><span>${esc(state.people[1].name)}</span></div>`;
+    html+='<div class="week-events person-split">';
+    for(const [pi,list] of [[0,p0],[1,p1]]){
+      html+=`<div class="week-person-lane person-${pi}">`;
+      html+=list.length?list.map(e=>renderEventButton(e,'week-event','week')).join(''):'<div class="empty-person-lane">—</div>';
+      html+='</div>';
+    }
+    html+='</div>';
+    if(shared.length) html+=`<div class="week-shared">${shared.map(e=>renderEventButton(e,'week-event shared-event','week')).join('')}</div>`;
+    html+=simpleDayInsight(key,derived);
+    html+='</section>';
+  }
+  html+='</div>';
+  $('calendar').innerHTML=html;
+}
+
+function localMinuteOfDay(date){
+  const parts=new Intl.DateTimeFormat('en-GB',{timeZone:state.rules.homeTz,hour:'2-digit',minute:'2-digit',hour12:false}).formatToParts(new Date(date));
+  const o=Object.fromEntries(parts.map(x=>[x.type,x.value]));
+  return Number(o.hour)*60+Number(o.minute);
+}
+function timelineSegment(e,key){
+  // Position events from their *actual overlap* with this local calendar day.
+  // Using elapsed milliseconds instead of the formatted clock time avoids Safari/
+  // timezone edge cases that could pin a late-night event at 00:00 and make it
+  // look as if sleep and a duty were happening simultaneously.
+  const dayStart=utcForLocalDayTime(key,'00:00');
+  const dayEnd=utcForLocalDayTime(addDaysKey(key,1),'00:00');
+  const eventStart=+new Date(e.start), eventEnd=+new Date(e.end);
+  const startMs=Math.max(eventStart,+dayStart), endMs=Math.min(eventEnd,+dayEnd);
+  if(endMs<=startMs) return null;
+  const dayMs=+dayEnd-(+dayStart);
+  const startMin=((startMs-(+dayStart))/dayMs)*1440;
+  const endMin=((endMs-(+dayStart))/dayMs)*1440;
+  return {
+    e,
+    start:new Date(startMs),
+    end:new Date(endMs),
+    startMin:Math.max(0,Math.min(1440,startMin)),
+    endMin:Math.max(startMin+1,Math.min(1440,endMin)),
+    startsBeforeDay:eventStart < +dayStart,
+    endsAfterDay:eventEnd > +dayEnd,
+    lane:0,laneCount:1
+  };
+}
+function segmentTimeRange(seg){
+  if(seg.startsBeforeDay && seg.endsAfterDay) return '00:00–24:00 · continúa';
+  if(seg.startsBeforeDay) return `00:00–${timeLocal(seg.end)} · desde ayer`;
+  if(seg.endsAfterDay) return `${timeLocal(seg.start)}–24:00 · sigue mañana`;
+  return `${timeLocal(seg.start)}–${timeLocal(seg.end)}`;
+}
+function segmentBlockMeta(seg){
+  const e=seg.e, when=segmentTimeRange(seg);
+  if(e.kind==='duty'){
+    const raw=e.raw||{}, bits=[when];
+    if(raw.type&&raw.type!=='N/A') bits.push(raw.type);
+    if(state.calendarDensity==='full'&&raw.dt) bits.push(`DT ${raw.dt}`);
+    return bits.filter(Boolean).join(' · ');
+  }
+  if(e.kind==='recovery') return `${when}${e.level==='full'?' · completo':' · parcial'}`;
+  return when;
+}
+function assignTimelineLanes(segments){
+  const xs=[...segments].sort((a,b)=>a.startMin-b.startMin||a.endMin-b.endMin);
+  let active=[], group=[], groupId=0;
+  const groups=new Map();
+  for(const seg of xs){
+    active=active.filter(a=>a.endMin>seg.startMin);
+    if(!active.length){ group=[]; groupId++; }
+    const used=new Set(active.map(a=>a.lane)); let lane=0; while(used.has(lane)) lane++;
+    seg.lane=lane; seg.groupId=groupId; active.push(seg); group.push(seg);
+    groups.set(groupId,Math.max(groups.get(groupId)||1,lane+1));
+  }
+  xs.forEach(s=>s.laneCount=groups.get(s.groupId)||1);
+  return xs;
+}
+function assignPersonTimelineLanes(segments){
+  const result=[];
+  for(const pi of [0,1]){
+    const own=segments.filter(s=>s.e.person===pi);
+    assignTimelineLanes(own);
+    result.push(...own);
+  }
+  const shared=segments.filter(s=>s.e.person==null);
+  assignTimelineLanes(shared);
+  result.push(...shared);
+  return result.sort((a,b)=>a.startMin-b.startMin||a.endMin-b.endMin);
+}
+
+function renderDayCalendar(derived){
+  const key=state.focusDate; const ev=calendarVisibleEvents(eventsForDay(key,derived,true),'day'); const todayKey=dayKey(new Date());
+  $('monthTitle').textContent=localDayLabel(key,{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  $('calendar').className='calendar day-view split-people';
+  const allDay=ev.filter(e=>e.kind==='status');
+  const rawSegments=ev.filter(e=>e.kind!=='status'&&e.start&&e.end).map(e=>timelineSegment(e,key)).filter(Boolean);
+  const segments=assignPersonTimelineLanes(rawSegments);
+  const H=64, dayHeight=24*H;
+  let html=`<div class="day-agenda ${key===todayKey?'today':''}"><div class="day-agenda-head"><span>${ev.length} ${ev.length===1?'evento':'eventos'}</span><b>${esc(state.rules.homeTz)}</b></div>`;
+  if(state.calendarDensity==='simple'){
+    const cw=coupleWindowForDay(key,derived);
+    if(cw) html+=`<div class="day-opportunity"><span>❤️ Mejor ventana juntos</span><b>${timeLocal(cw.start)}–${timeLocal(cw.end)}</b></div>`;
+  }
+  html+=`<div class="day-person-head"><span>${esc(state.people[0].name)}</span><span>${esc(state.people[1].name)}</span></div>`;
+  if(allDay.length){
+    const a0=allDay.filter(e=>e.person===0), a1=allDay.filter(e=>e.person===1), ash=allDay.filter(e=>e.person==null);
+    html+='<div class="all-day-row split-all-day"><span class="all-day-label">Todo el día</span><div class="all-day-people">';
+    for(const [pi,list] of [[0,a0],[1,a1]]){
+      html+=`<div class="all-day-person person-${pi}">${list.map(e=>renderEventButton(e,'all-day-event','day')).join('')||'<span class="empty-person-lane">—</span>'}</div>`;
+    }
+    html+='</div></div>';
+    if(ash.length) html+=`<div class="all-day-shared">${ash.map(e=>renderEventButton(e,'all-day-event shared-event','day')).join('')}</div>`;
+  }
+  if(!segments.length && !allDay.length){
+    html+='<div class="empty-agenda"><strong>Día despejado</strong><span>No hay duties, sueño, recovery ni ventanas calculadas para este día.</span></div>';
+  }else if(segments.length){
+    html+=`<div class="timeline-scroll"><div class="timeline-canvas split-timeline" style="height:${dayHeight}px">`;
+    for(let h=0;h<24;h++){
+      html+=`<div class="timeline-hour-label" style="top:${h*H-8}px">${String(h).padStart(2,'0')}:00</div><div class="timeline-hour-line" style="top:${h*H}px"></div>`;
+    }
+    html+='<div class="timeline-person-divider" aria-hidden="true"></div>';
+    if(key===todayKey){
+      const nowMin=localMinuteOfDay(new Date());
+      html+=`<div class="timeline-now" style="top:${nowMin/60*H}px"><span></span></div>`;
+    }
+    for(const seg of segments){
+      const e=seg.e, id=registerEvent(e), top=seg.startMin/60*H, rawHeight=(seg.endMin-seg.startMin)/60*H, height=Math.max(rawHeight,30);
+      let leftPct,widthPct;
+      if(e.person==null){
+        leftPct=0; widthPct=100;
+      }else{
+        const sideBase=e.person===0?0:50;
+        const subWidth=50/seg.laneCount;
+        leftPct=sideBase+seg.lane*subWidth;
+        widthPct=subWidth;
+      }
+      const compact=height<48?' compact':'';
+      html+=`<button type="button" class="timeline-event ${eventClass(e)} ${personLaneClass(e)}${compact}" data-event-id="${id}" style="top:${top}px;height:${height}px;left:calc(${leftPct}% + 5px);width:calc(${widthPct}% - 9px)" aria-label="Ver detalle de ${esc(eventText(e))}"><span class="timeline-event-title">${esc(eventBlockTitle(e))}</span><span class="timeline-event-meta">${esc(segmentBlockMeta(seg))}</span>${height>=72?`<span class="timeline-event-sub">${esc(eventSubtitle(e))}</span>`:''}</button>`;
+    }
+    html+='</div></div>';
+  }
+  html+='</div>';
+  $('calendar').innerHTML=html;
+  const scroll=$('calendar').querySelector('.timeline-scroll');
+  if(scroll&&segments.length){
+    const first=Math.min(...segments.map(s=>s.startMin));
+    requestAnimationFrame(()=>{ scroll.scrollTop=Math.max(0,(first/60)*H-H); });
+  }
+}
+
+function eventTitle(e){
+  if(e.kind==='duty') return `${state.people[e.person].name} · ${e.raw?.route||e.raw?.base||'Duty'}`;
+  if(e.kind==='status') return `${state.people[e.person].name} · ${e.label}`;
+  if(e.kind==='sleep') return `🌙 Sueño protegido · ${state.people[e.person].name}`;
+  if(e.kind==='quiet') return `🔇 Quiet hours · ${state.people[e.person].name}`;
+  if(e.kind==='recovery') return `${e.level==='full'?'🔴':'🟡'} ${e.label} · ${state.people[e.person].name}`;
+  if(e.kind==='couple') return '❤️ Ventana juntos';
+  return e.label||'Evento';
+}
+function eventSubtitle(e){
+  if(e.kind==='duty'){
+    const raw=e.raw||{}; const bits=[];
+    if(raw.type&&raw.type!=='N/A') bits.push(raw.type);
+    if(state.calendarDensity==='full'){ if(raw.dt)bits.push(`DT ${raw.dt}`); if(raw.ft)bits.push(`FT ${raw.ft}`); }
+    return bits.join(' · ');
+  }
+  if(e.kind==='status') return 'Estado del roster';
+  if(e.kind==='sleep') return e.sleepConflict?'Coincide realmente con un duty · revisar roster':`${state.rules.sleepHours} h antes del report`;
+  if(e.kind==='quiet') return `${state.rules.quietLead} min antes del sueño protegido`;
+  if(e.kind==='recovery') return e.reasons?.length?e.reasons.join(' · '):'Recovery calculado por las reglas de casa';
+  if(e.kind==='couple') return `${((e.end-e.start)/3600000).toFixed(1)} h potenciales juntos`;
+  return '';
+}
+
+function detailRow(label,value){ return `<div class="detail-row"><span>${esc(label)}</span><b>${esc(value)}</b></div>`; }
+function openEventDetails(id){
+  const e=renderedEvents.get(id); if(!e)return;
+  $('eventModalKicker').textContent=eventKicker(e);
+  $('eventModalTitle').textContent=eventTitle(e);
+  $('eventModalBody').innerHTML=eventDetailHtml(e);
+  $('eventModal').classList.remove('hidden'); $('eventModal').setAttribute('aria-hidden','false'); document.body.classList.add('modal-open');
+}
+function closeEventDetails(){ $('eventModal').classList.add('hidden'); $('eventModal').setAttribute('aria-hidden','true'); document.body.classList.remove('modal-open'); }
+function eventKicker(e){
+  return ({duty:'Duty',status:'Roster',sleep:'Descanso',quiet:'Convivencia',recovery:'Recovery',couple:'Tiempo juntos'})[e.kind]||'Detalle';
+}
+function eventDetailHtml(e){
+  if(e.kind==='duty'){
+    const d=e.raw||{};
+    const localRange=`${timeLocal(e.start)}–${d.checkout?timeLocal(e.end):'?'}`;
+    let html='<div class="detail-section detail-summary"><h3>En pocas palabras</h3>';
+    html+=detailRow('Persona',state.people[e.person].name);
+    html+=detailRow('Ruta',d.route||d.base||'Duty');
+    html+=detailRow('Horario en casa',localRange);
+    if(d.type&&d.type!=='N/A') html+=detailRow('Tipo',d.type);
+    if(d.ft) html+=detailRow('Tiempo de vuelo',d.ft);
+    html+='</div>';
+    if(d.flights?.length){
+      html+='<div class="detail-section"><h3>Sectores</h3><div class="sector-list">';
+      d.flights.forEach(f=>{
+        const depOff=f.depDayOffset?`+${f.depDayOffset}`:''; const arrOff=f.arrDayOffset?`+${f.arrDayOffset}`:'';
+        const basis=d.timeBasis==='local_event'?'hora local de cada aeropuerto':'UTC';
+        html+=`<div class="sector"><b>${esc(`${f.dep} → ${f.arr}`)}</b><span>${esc(`${f.carrier} ${f.number} · ${hhmmDisplay(f.depTime)}${depOff}–${hhmmDisplay(f.arrTime)}${arrOff} · ${basis}`)}</span><small>${esc(f.aircraft||'')}</small></div>`;
+      });
+      html+='</div></div>';
+    }
+    html+='<details class="technical-details"><summary>Datos CrewLink / técnicos</summary><div class="technical-details-body">';
+    html+=detailRow('C/I · hora de casa',localDateTime(e.start));
+    html+=detailRow('C/O · hora de casa',d.checkout?localDateTime(e.end):'Sin C/O detectado');
+    html+=detailRow('Base horaria del roster',d.timeBasis==='local_event'?'Horas locales en cada aeropuerto':'UTC');
+    html+=detailRow('C/I · roster',sourceRosterTime(d,'in'));
+    html+=detailRow('C/O · roster',d.checkout?sourceRosterTime(d,'out'):'Sin C/O detectado');
+    if(d.dt) html+=detailRow('DT',d.dt);
+    if(d.fdt) html+=detailRow('FDT',d.fdt);
+    if(d.fdp) html+=detailRow('FDP',d.fdp);
+    if(d.sdt) html+=detailRow('SDT',d.sdt);
+    if(d.max) html+=detailRow('max',d.max);
+    if(d.rt) html+=detailRow('RT',d.rt);
+    if(d.brk) html+=detailRow('BRK',d.brk);
+    html+='</div></details>';
+    return html;
+  }
+  if(e.kind==='status'){
+    return `<div class="detail-section"><h3>Resumen</h3>${detailRow('Persona',state.people[e.person].name)}${detailRow('Estado',e.label)}${detailRow('Fecha',localDayLabel(e.date,{weekday:'long',day:'numeric',month:'long',year:'numeric'}))}<p class="detail-note">Este código procede directamente del roster importado.</p></div>`;
+  }
+  if(e.kind==='sleep'){
+    const report=e.raw?.checkIn?localDateTime(e.raw.checkIn):'—';
+    const warning=e.sleepConflict?`<div class="warning-box"><b>⚠️ Conflicto real detectado</b><br>Este bloque de sueño se solapa temporalmente con ${esc((e.conflictDuties||[]).join(', ')||'un duty')}. RosterHome no lo considera una ventana de descanso válida; revisa la importación o las reglas.</div>`:'';
+    return `${warning}<div class="detail-section"><h3>Qué indica</h3><p class="detail-explainer">Bloque de sueño protegido calculado hacia atrás desde el report para asegurar el objetivo de descanso configurado.</p>${detailRow('Persona',state.people[e.person].name)}${detailRow('Desde',localDateTime(e.start))}${detailRow('Hasta',localDateTime(e.end))}${detailRow('Objetivo',`${state.rules.sleepHours} h`)}${detailRow('Report relacionado',report)}${detailRow('Ruta relacionada',e.raw?.route||'Duty')}</div>`;
+  }
+  if(e.kind==='quiet'){
+    return `<div class="detail-section"><h3>Qué indica</h3><p class="detail-explainer">Periodo previo al sueño protegido en el que conviene reducir ruido, llamadas, luces y actividad doméstica.</p>${detailRow('Persona',state.people[e.person].name)}${detailRow('Desde',localDateTime(e.start))}${detailRow('Hasta',localDateTime(e.end))}${detailRow('Duración',`${state.rules.quietLead} min`)}</div>`;
+  }
+  if(e.kind==='recovery'){
+    let html=`<div class="detail-section"><h3>Qué indica</h3><p class="detail-explainer">${e.level==='full'?'Recovery completo':'Recovery parcial'} generado por vuestras reglas de convivencia después de este duty. No es un cálculo EASA FTL.</p>${detailRow('Persona',state.people[e.person].name)}${detailRow('Desde',localDateTime(e.start))}${detailRow('Hasta',localDateTime(e.end))}${detailRow('Duración',`${((e.end-e.start)/3600000).toFixed(1)} h`)}`;
+    if(e.reasons?.length) html+=`<div class="reason-box"><b>Por qué se ha activado</b><ul>${e.reasons.map(r=>`<li>${esc(r)}</li>`).join('')}</ul></div>`;
+    html+='</div>'; return html;
+  }
+  if(e.kind==='couple'){
+    return `<div class="detail-section"><h3>Qué indica</h3><p class="detail-explainer">Es la mejor ventana continua del día, entre 08:00 y 23:00, en la que ninguno está bloqueado por duty o sueño protegido.</p>${detailRow('Desde',localDateTime(e.start))}${detailRow('Hasta',localDateTime(e.end))}${detailRow('Tiempo potencial',`${((e.end-e.start)/3600000).toFixed(1)} h`)}</div>`;
+  }
+  return '<div class="muted">Sin más información para este evento.</div>';
+}
+
+
+function ftlMinutes(value){
+  const h=RosterParser?.parseDuration?.(value); return h==null?null:Math.round(h*60);
+}
+function ftlFormatMinutes(value){return window.RosterHomeFTL?.formatMinutes?.(value)||gapLabel(value);}
+function ftlReferenceZone(d,profileBase){
+  const ref=(d?.acc||profileBase||d?.base||'').toUpperCase();
+  return RosterParser?.airportTimeZone?.(ref)||d?.sourceCheckInTimeZone||'UTC';
+}
+function ftlCivilAt(instant,timeZone){
+  const parts=new Intl.DateTimeFormat('en-CA',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(new Date(instant));
+  const o=Object.fromEntries(parts.map(p=>[p.type,p.value]));
+  return `${o.year}-${o.month}-${o.day}T${o.hour}:${o.minute}:${o.second}`;
+}
+function ftlSourceCivil(d,which,timeZone){
+  // Normalize instants at import/migration, then convert both ends to the SAME
+  // reference zone. Airport-local endpoints may be in different timezones.
+  return ftlCivilAt(which==='start'?d?.checkIn:d?.checkout,timeZone);
+}
+function ftlProfileBase(duties){
+  const counts=new Map();
+  duties.forEach(d=>{const b=String(d.base||'').toUpperCase();if(b)counts.set(b,(counts.get(b)||0)+1);});
+  return [...counts.entries()].sort((a,b)=>b[1]-a[1])[0]?.[0]||null;
+}
+function ftlTypeLabel(flags){
+  const xs=[];if(flags?.night)xs.push('NIGHT');if(flags?.early)xs.push('EARLY');if(flags?.late)xs.push('LATE');return xs.join(' + ')||'NORMAL';
+}
+function ftlEffectiveFlags(d,calculated){
+  // TYPE remains a cross-check, never an override for incorrectly parsed times.
+  return {...calculated,source:'calculated'};
+}
+function ftlStatusWord(status){return status==='bad'?'NON-COMPLIANT':status==='review'?'REVIEW':'COMPLIANT';}
+function ftlCheck(label,text,status='ok'){
+  return `<div class="ftl-check"><span>${esc(label)}</span><b>${esc(text)}</b><i class="${status}">${status==='bad'?'✕':status==='review'?'!':'✓'}</i></div>`;
+}
+function renderFtl(){
+  const engine=window.RosterHomeFTL;
+  const history=window.RosterHistory;
+  const month=state.ftlMonth||state.month;
+  if($('ftlMonth'))$('ftlMonth').value=month||'';
+  const all=state.people.flatMap(p=>p.duties||[]);
+  const duties=all.filter(d=>d.kind==='duty'&&(!month||String(d.date).startsWith(month)));
+  const withRoster=state.people.filter(p=>(p.duties||[]).some(d=>d.kind==='duty')).length;
+  if($('ftlDuties')) $('ftlDuties').textContent=String(duties.length);
+  if($('ftlPeople')) $('ftlPeople').textContent=`${withRoster}/2`;
+  if($('ftlPeriod')){
+    const dates=duties.map(d=>String(d.date||d.checkIn||'').slice(0,10)).filter(Boolean).sort();
+    $('ftlPeriod').textContent=dates.length?`${dates[0].slice(8,10)}/${dates[0].slice(5,7)} – ${dates.at(-1).slice(8,10)}/${dates.at(-1).slice(5,7)}`:'—';
+  }
+  if(!engine||!history){
+    if($('ftlOverall'))$('ftlOverall').textContent='ERROR';
+    if($('ftlSummaryLine'))$('ftlSummaryLine').textContent='No se ha cargado ftl-engine.js.';
+    if($('ftlDutyResults'))$('ftlDutyResults').innerHTML='<div class="notice">No se pudo cargar el motor FTL.</div>';
+    return;
+  }
+  if(!duties.length){
+    if($('ftlOverall'))$('ftlOverall').textContent='—';
+    if($('ftlDutyResults'))$('ftlDutyResults').innerHTML='<div class="muted">Importa un roster para analizarlo.</div>';
+    return;
+  }
+
+  let badCount=0,reviewCount=0,okCount=0;
+  const peopleHtml=[];
+  state.people.forEach((person,pi)=>{
+    const ds=dedupeDuties((person.duties||[]).map(d=>RosterParser.repairLegacyDuty(d))).filter(d=>d.kind==='duty'&&d.checkIn&&d.checkout).sort((a,b)=>a.checkIn.localeCompare(b.checkIn));
+    if(!ds.length)return;
+    const base=person.homeBase||ftlProfileBase(ds);
+    const baseTz=RosterParser?.airportTimeZone?.(base)||state.rules.homeTz||'UTC';
+    const records=ds.map(d=>history.record(d,RosterParser.airportTimeZone));
+    const coverage=person.coverage||[];
+    const gapText=(ranges)=>ranges.map(([a,b])=>`${history.civil(a,baseTz).slice(0,10)}–${history.civil(b-1,baseTz).slice(0,10)}`).join(', ');
+    let rows='';
+    ds.forEach((d,i)=>{
+      if(month&&!String(d.date).startsWith(month))return;
+      const hasFlight=!d.serviceType||d.serviceType==='flight',standby=d.serviceType==='standby';
+      const tz=ftlReferenceZone(d,base),civilStart=ftlSourceCivil(d,'start',tz),civilEnd=ftlSourceCivil(d,'end',tz);
+      const calculatedFlags=engine.classifyDisruptiveDuty(civilStart,civilEnd),flags=ftlEffectiveFlags(d,calculatedFlags),sectors=Math.max(1,d.flights?.length||1);
+      const actualFdp=ftlMinutes(d.fdp)??ftlMinutes(d.fdt),basicMax=hasFlight?engine.table2MaxForCivil(civilStart,sectors):null,crewMax=ftlMinutes(d.max);
+      const xfdp=ftlMinutes(d.xfdp);
+      const checks=[];let status='ok';
+      if(d.timeRepairRequired){
+        rows+=`<details class="ftl-duty-row"><summary><b>${esc(d.date)} · ${esc(d.route||'Duty')}</b><span class="ftl-badge review">REVIEW</span></summary><div class="ftl-duty-body">Base horaria antigua sin datos suficientes para repararla. Reimporta el PDF original; no se calcula cumplimiento con horas inciertas.</div></details>`;
+        reviewCount++;return;
+      }
+
+      if(!hasFlight){
+        checks.push(['Servicio',`${d.route} · ${ftlFormatMinutes((records[i].endMs-records[i].startMs)/60000)} de intervalo`,'ok']);
+        checks.push(['Crédito duty',`${ftlFormatMinutes(records[i].dutyMinutes)} · ${standby?'SDT CrewLink':'jornada completa'} · vuelo operado 0:00`,'ok']);
+        if(standby){
+          const cap=d.standbyType==='other'?960:d.standbyType==='airport'?360:null;
+          checks.push(['Standby',cap==null?'Modalidad no identificada':`${d.standbyType==='other'?'Fuera del aeropuerto (SDT ≈ 25%)':'Aeropuerto (SDT 100%)'} · máximo ${ftlFormatMinutes(cap)}`,cap==null?'review':d.elapsedMinutes<=cap?'ok':'bad']);
+        }
+      }else if(actualFdp!=null&&basicMax!=null){
+        if(actualFdp<=basicMax){checks.push(['FDP básico',`${ftlFormatMinutes(actualFdp)} / ${ftlFormatMinutes(basicMax)} máx. · ${sectors} sector${sectors===1?'':'es'}`,'ok']);}
+        else if(xfdp&&actualFdp<=xfdp){checks.push(['FDP básico',`${ftlFormatMinutes(actualFdp)} > ${ftlFormatMinutes(basicMax)} básico; xFDP CrewLink ${ftlFormatMinutes(xfdp)}`,'review']);status='review';}
+        else{checks.push(['FDP básico',`${ftlFormatMinutes(actualFdp)} > ${ftlFormatMinutes(basicMax)} máx.`,'bad']);status='bad';}
+      }else checks.push(['FDP básico','Datos insuficientes para comparar','review']),status='review';
+      if(crewMax!=null&&basicMax!=null&&Math.abs(crewMax-basicMax)>1){checks.push(['CrewLink max',`${ftlFormatMinutes(crewMax)} vs Tabla 2 ${ftlFormatMinutes(basicMax)}`,'review']);if(status==='ok')status='review';}
+
+      if(hasFlight)checks.push(['Disruptive',`${ftlTypeLabel(flags)} · calculado · ref. ${d.acc||base||d.base||'—'} (${tz})`,'ok']);
+      const crewType=String(d.type||'').toUpperCase();
+      if(hasFlight&&crewType&&crewType!=='N/A'&&crewType!=='NORMAL'&&!crewType.includes(flags.primaryType)){
+        checks.push(['TYPE CrewLink',`${crewType} ≠ cálculo ${flags.primaryType}`,'review']);if(status==='ok')status='review';
+      }
+
+      if(i>0){
+        const prev=ds[i-1],home=String(d.base||'').toUpperCase()===base;
+        const prevDuty=Math.round((new Date(prev.checkout)-new Date(prev.checkIn))/60000);
+        const actualRest=Math.round((new Date(d.checkIn)-new Date(prev.checkout))/60000);
+        const requiredRest=engine.minimumRestMinutes(prevDuty,home);
+        const restGaps=history.gaps(coverage,Date.parse(prev.checkout),Date.parse(d.checkIn));
+        const callout=prev.serviceType==='standby'&&actualRest<requiredRest&&hasFlight;
+        const restStatus=restGaps.length||callout?'review':actualRest>=requiredRest?'ok':'bad';
+        if(hasFlight||standby)checks.push(['Descanso mínimo',callout?'Asignación tras standby: faltan hora de aviso y condiciones de activación':`${ftlFormatMinutes(actualRest)} / ${ftlFormatMinutes(requiredRest)} req. · ${home?'base':'fuera de base'}${restGaps.length?' · falta cobertura '+gapText(restGaps):''}`,restStatus]);
+        else checks.push(['Intervalo previo',`${ftlFormatMinutes(actualRest)} entre servicios; sin FDP operado`,'ok']);
+        if(restStatus==='bad')status='bad';
+
+        const previousFdp=ds.slice(0,i).findLast(x=>!x.serviceType||x.serviceType==='flight');
+        if(home&&hasFlight&&previousFdp){
+          const transition=engine.validateDisruptiveTransition(
+            {start:ftlSourceCivil(previousFdp,'start',baseTz),end:ftlSourceCivil(previousFdp,'end',baseTz)},
+            {start:ftlSourceCivil(d,'start',baseTz),end:ftlSourceCivil(d,'end',baseTz)},
+            {atHomeOrOperatingBase:true}
+          );
+          const previousFlags=ftlEffectiveFlags(previousFdp,transition.previous);
+          const nextFlags=ftlEffectiveFlags(d,transition.next);
+          const requiresLocalNight=(previousFlags.late||previousFlags.night)&&nextFlags.early;
+          // A simulator/standby inside the interval cannot be counted as a
+          // continuous free local night. Sum only gaps between all services.
+          const intervening=ds.filter(x=>Date.parse(x.checkIn)>=Date.parse(previousFdp.checkout)&&Date.parse(x.checkout)<=Date.parse(d.checkIn));
+          let freeStart=previousFdp.checkout,nights=0;
+          for(const x of [...intervening,{checkIn:d.checkIn,checkout:d.checkIn}]){
+            nights+=engine.countLocalNights(ftlCivilAt(freeStart,baseTz),ftlCivilAt(x.checkIn,baseTz));freeStart=x.checkout;
+          }
+          transition.localNights=nights;
+          const transitionCompliant=!requiresLocalNight||transition.localNights>=1;
+          if(requiresLocalNight){
+            const trGaps=history.gaps(coverage,Date.parse(previousFdp.checkout),Date.parse(d.checkIn));
+            const trStatus=trGaps.length?'review':transitionCompliant?'ok':'bad';
+            checks.push(['LATE/NIGHT → EARLY',`${transition.localNights} local night${transition.localNights===1?'':'s'} entre FDPs`,trStatus]);
+            if(trStatus==='bad')status='bad';
+          }else{
+            checks.push(['Transición',`${ftlTypeLabel(previousFlags)} → ${ftlTypeLabel(nextFlags)} · no exige Local Night`,'ok']);
+          }
+        }
+      }else checks.push(['Descanso previo','No hay duty anterior dentro del roster importado','review']);
+
+      const dailyStatus=checks.some(c=>c[2]==='bad')?'bad':checks.some(c=>c[2]==='review')?'review':'ok';
+      const windows=Object.fromEntries([7,14,28].map(n=>[n,history.cumulative(records,i,n,baseTz)]));
+      const cum={duty7:windows[7].duty,duty14:windows[14].duty,duty28:windows[28].duty,flight28:windows[28].flight},cumValidation=engine.validateCumulative(cum);
+      const cumulativeChecks=[];
+      for(const c of cumValidation.checks){
+        const days=Number(c.label.match(/\d+/)?.[0]||28),w=windows[days],missing=history.gaps(coverage,w.start,w.end),timingKnown=!c.label.startsWith('Flight')||w.flightTimingKnown;
+        const cStatus=!timingKnown?'review':!c.compliant?'bad':!missing.length?'ok':'review';
+        cumulativeChecks.push([c.label,`${ftlFormatMinutes(c.actual)} / ${ftlFormatMinutes(c.limit)}${missing.length?' · falta cobertura '+gapText(missing):''}${timingKnown?'':' · horarios de sectores sin reconciliar'}`,cStatus]);
+        if(cStatus==='bad')status='bad';
+      }
+      checks.push(...cumulativeChecks);
+      const cumulativeStatus=cumulativeChecks.some(c=>c[2]==='bad')?'bad':cumulativeChecks.some(c=>c[2]==='review')?'review':'ok';
+
+      // Aggregate every check, including missing history; never display green
+      // when one of the detailed checks still needs review.
+      status=checks.some(c=>c[2]==='bad')?'bad':checks.some(c=>c[2]==='review')?'review':'ok';
+      if(status==='bad')badCount++;else if(status==='review')reviewCount++;else okCount++;
+      const date=String(d.date||d.checkIn).slice(0,10),route=d.route||d.base||'Duty';
+      const reviewChecks=checks.filter(c=>c[2]==='review');
+      const reviewReason=reviewChecks.length?(reviewChecks.every(c=>c[0]==='Descanso previo'||c[1].includes('falta cobertura'))?'Historial incompleto · abre para ver fechas':reviewChecks.map(c=>c[0]).join(' · ')):'';
+      const report=civilStart.slice(11,16),co=civilEnd.slice(11,16);
+      rows+=`<details class="ftl-duty-row"><summary><div class="ftl-duty-main"><b>${esc(date.slice(8,10)+'/'+date.slice(5,7))} · ${esc(report)}–${esc(co)}</b><small>${hasFlight?esc(ftlTypeLabel(flags)):'Sin vuelo operado'} · ${esc(tz)}</small></div><div class="ftl-duty-route"><b>${esc(route)}</b><small>${hasFlight?`FDP ${esc(ftlFormatMinutes(actualFdp))} · max ${esc(ftlFormatMinutes(basicMax))}`:`Crédito duty ${esc(ftlFormatMinutes(records[i].dutyMinutes))}`}</small><small>Jornada: ${ftlStatusWord(dailyStatus)} · Acumulados: ${ftlStatusWord(cumulativeStatus)}</small>${reviewReason?`<small>${esc(reviewReason)}</small>`:''}</div><span class="ftl-badge ${status}">${ftlStatusWord(status)}</span></summary><div class="ftl-duty-body">${checks.map(c=>ftlCheck(c[0],c[1],c[2])).join('')}<div class="ftl-note">Base del perfil: ${esc(base||'—')}. Acumulados por días naturales en ${esc(baseTz)}. COMPLIANT se refiere a las comprobaciones implementadas, no a todas las reglas del OM-A.</div></div></details>`;
+    });
+    const reserves=(person.duties||[]).filter(x=>x.kind==='status'&&x.status==='RES'&&(!month||x.date.startsWith(month)));
+    const coverageLabel=coverage.length?coverage.map(c=>`${c.start}–${c.end}: ${c.complete?'totales reconciliados con PDF':'lectura parcial'}`).join(' · '):'Reimporta los PDF: los datos antiguos no conservan cobertura verificada.';
+    peopleHtml.push(`<section class="ftl-person-block"><div class="ftl-person-title"><b>${esc(person.name||`Perfil ${pi+1}`)}</b><span>Base: ${esc(base||'—')}</span></div><p class="ftl-note">${esc(coverageLabel)}</p>${reserves.length?`<p class="ftl-note">RES: ${reserves.map(x=>esc(x.date)).join(', ')}. Crédito 0:00 según OM-A 7.1.16; no se considera OFF. El PDF no permite comprobar el aviso de asignación ni las 8 h protegidas.</p>`:''}${rows}</section>`);
+  });
+
+  if($('ftlDutyResults'))$('ftlDutyResults').innerHTML=peopleHtml.join('');
+  const total=badCount+reviewCount+okCount;
+  const overall=badCount?'NON-COMPLIANT':reviewCount?'REVIEW':'COMPLIANT';
+  if($('ftlOverall'))$('ftlOverall').textContent=overall;
+  if($('ftlResultMetric'))$('ftlResultMetric').className=`ftl-metric ${badCount?'bad':reviewCount?'review':'good'}`;
+  if($('ftlSummaryLine'))$('ftlSummaryLine').textContent=`${okCount} compliant · ${reviewCount} review · ${badCount} non-compliant · ${total} duties`;
+}
+
+function renderSummary(){
+  const [y,m]=state.month.split('-').map(Number); const days=new Date(y,m,0).getDate(); const derived=allDerived(); let windows=[];
+  for(let d=1;d<=days;d++){const key=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const w=coupleWindowForDay(key,derived); if(w) windows.push({key,...w,h:(w.end-w.start)/3600000});}
+  const recs=derived.filter(e=>e.kind==='recovery' && dayKey(e.start).startsWith(state.month));
+  const duties=derived.filter(e=>e.kind==='duty' && dayKey(e.start).startsWith(state.month));
+  const sleepConflicts=derived.filter(e=>e.kind==='sleep'&&dayKey(e.start).startsWith(state.month));
+  const togetherH=windows.reduce((s,w)=>s+w.h,0);
+  $('stats').innerHTML=[['✈️ Duties',duties.length],['🟡/🔴 Recovery',recs.length],['❤️ Ventanas ≥2 h',windows.length],['🕒 Tiempo potencial',`${togetherH.toFixed(0)} h`]].map(([a,b])=>`<div class="stat"><span class="muted">${a}</span><b>${b}</b></div>`).join('');
+  windows.sort((a,b)=>b.h-a.h); $('bestWindows').innerHTML=windows.slice(0,8).map(w=>`<div class="summary-row"><span>${fmt(utcForLocalDayTime(w.key,'12:00'),{weekday:'short',day:'numeric',month:'short'})}</span><b>${timeLocal(w.start)}–${timeLocal(w.end)} · ${w.h.toFixed(1)} h</b></div>`).join('') || '<div class="muted">Importa ambos rosters para calcularlo.</div>';
+  const issues=[];
+  for(const e of recs){issues.push({date:dayKey(e.start),txt:`${state.people[e.person].name}: ${e.level==='full'?'recovery completo':'recovery parcial'}`});}
+  sleepConflicts.forEach(e=>{
+    const key=dayKey(e.start); const dinner=utcForLocalDayTime(key,state.rules.dinnerTime); const flex=minMs(state.rules.mealFlex); if(dinner>=new Date(e.start.getTime()-flex)&&dinner<=new Date(e.end.getTime()+flex)) issues.push({date:key,txt:`${state.people[e.person].name}: la cena preferida cae cerca/dentro del sueño protegido`});
+  });
+  issues.sort((a,b)=>a.date.localeCompare(b.date)); $('coordination').innerHTML=issues.slice(0,12).map(i=>`<div class="summary-row"><span>${i.date.slice(8,10)}/${i.date.slice(5,7)}</span><b>${esc(i.txt)}</b></div>`).join('') || '<div class="muted">No hay conflictos destacados en este mes.</div>';
+}
+
+async function extractPdfText(file){
+  if(!window.pdfjsLib) throw new Error('No se pudo cargar el lector PDF. Comprueba la conexión e inténtalo de nuevo.');
+  const data=new Uint8Array(await file.arrayBuffer()); const pdf=await pdfjsLib.getDocument({data}).promise; let out='';
+  for(let p=1;p<=pdf.numPages;p++){
+    const page=await pdf.getPage(p); const viewport=page.getViewport({scale:1}); const tc=await page.getTextContent();
+    const items=tc.items.filter(i=>i.str&&i.str.trim()).map(i=>{ const t=pdfjsLib.Util.transform(viewport.transform,i.transform); const width=Number(i.width||0); return {str:i.str.trim(),x:t[4],cx:t[4]+width/2,y:t[5]}; });
+    // CrewLink landscape pages contain two independent duty columns. Split exactly at
+    // the page centre and assign by text-centre so date labels near the gutter do not
+    // get detached from their C/I/C/O row.
+    const mid=viewport.width*0.5;
+    const build=(xs)=>{ const rows=[]; xs.sort((a,b)=>a.y-b.y||a.x-b.x); for(const it of xs){ let row=rows.find(r=>Math.abs(r.y-it.y)<2.4); if(!row){row={y:it.y,items:[]};rows.push(row);} row.items.push(it); } rows.sort((a,b)=>a.y-b.y); return rows.map(r=>r.items.sort((a,b)=>a.x-b.x).map(x=>x.str).join(' ')).join('\n'); };
+    // Read page-wide metadata BEFORE column splitting: the time-basis heading
+    // straddles the gutter in CrewLink and must stay intact.
+    out+='\n'+build([...items]).split('\n').filter(line=>/Local\s+times\s+at\s+event\s+airport|Individual duty plan|^Period:/i.test(line)).join('\n')+'\n';
+    out+=`\n[[PAGE ${p} LEFT]]\n`+build(items.filter(i=>i.cx<mid))+`\n[[PAGE ${p} RIGHT]]\n`+build(items.filter(i=>i.cx>=mid));
+  }
+  return out;
+}
+
+function mergeParsed(personIndex, parsed, source){
+  const person=state.people[personIndex];
+  if(person.crewCode&&parsed.crew?.crewCode&&person.crewCode!==parsed.crew.crewCode)throw new Error(`Este perfil contiene ${person.crewCode}; el archivo es de ${parsed.crew.crewCode}. Selecciona el otro perfil.`);
+  const old=dedupeDuties(state.people[personIndex].duties||[]);
+  const incoming=dedupeDuties(parsed.duties||[]);
+
+  // A roster import is authoritative for the period printed in that roster.
+  // Older versions appended to localStorage, so stale/misparsed copies survived
+  // every re-import and generated duplicated duty/sleep/recovery blocks.
+  let preserved=old;
+  if(parsed.period){
+    const startKey=parsed.period.start.toISOString().slice(0,10);
+    const endKey=parsed.period.end.toISOString().slice(0,10);
+    preserved=old.filter(d=>{
+      const key=d.kind==='duty' ? (d.date || String(d.checkIn||'').slice(0,10)) : d.date;
+      return !key || key<startKey || key>endKey;
+    });
+  }
+
+  state.people[personIndex].duties=dedupeDuties([...preserved,...incoming]);
+  state.people[personIndex].source=source;
+  person.crewCode=parsed.crew?.crewCode||person.crewCode;
+  person.homeBase=parsed.coverage?.homeBase||person.homeBase;
+  person.coverage=window.RosterHistory.replaceCoverage(person.coverage,parsed.coverage);
+  if(parsed.crew?.name && !state.people[personIndex].name) state.people[personIndex].name=parsed.crew.name;
+  if(parsed.period){const latest=person.duties.map(d=>String(d.date||'').slice(0,7)).filter(Boolean).sort().at(-1);state.month=latest;state.ftlMonth=latest;state.focusDate=latest+'-01';}
+  saveState({immediate:true}); syncInputs(); renderCalendar();
+  return incoming.filter(x=>x.kind==='duty').length;
+}
+
+
+function gapLabel(minutes){
+  if(minutes==null || !Number.isFinite(minutes)) return '—';
+  const m=Math.max(0,Math.round(minutes)); return `${Math.floor(m/60)} h ${String(m%60).padStart(2,'0')} min`;
+}
+function renderImportAudit(personIndex, parsed){
+  const el=$(`audit${personIndex}`); if(!el) return;
+  const v=parsed?.validation; if(!v){el.innerHTML='';return;}
+  const s=v.stats||{};
+  const chips=[
+    `${s.duties||0} servicios detectados`,
+    parsed.coverage?.complete?'Totales FT, DT y SDT reconciliados':'Cobertura parcial: revisar avisos',
+    parsed.timeBasis==='local_event'?'horario CrewLink: local por aeropuerto':'horario CrewLink: UTC',
+    `${s.overlaps||0} solapamientos`,
+    `${s.brkMatches||0} continuidades BRK verificadas`,
+    `${s.inferredDates||0} fechas reconstruidas`,
+    `intervalo mínimo ${gapLabel(s.minGapMinutes)}`
+  ];
+  let html=`<div class="audit-title">${v.ok?'✓ Importación coherente':'⚠️ Importación detenida'}</div><div class="audit-chips">${chips.map(x=>`<span>${esc(x)}</span>`).join('')}</div>`;
+  if(v.errors?.length) html+=`<div class="audit-errors"><b>Errores:</b><ul>${v.errors.slice(0,4).map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`;
+  if(v.warnings?.length) html+=`<details class="audit-warnings"><summary>${v.warnings.length} aviso${v.warnings.length===1?'':'s'} de coherencia</summary><ul>${v.warnings.slice(0,6).map(x=>`<li>${esc(x)}</li>`).join('')}</ul></details>`;
+  el.className='import-audit '+(v.ok?'ok':'bad'); el.innerHTML=html;
+}
+function validateBeforeMerge(parsed){
+  const n=(parsed?.duties||[]).filter(x=>x.kind==='duty').length;
+  if(!n) throw new Error('No he encontrado servicios con horario reconocible.');
+  if(parsed.validation && !parsed.validation.ok){
+    const first=parsed.validation.errors?.[0]||'La secuencia temporal no es coherente.';
+    throw new Error(`No he guardado este roster porque el importador detectó una incoherencia: ${first}`);
+  }
+  return n;
+}
+
+async function handleFile(personIndex,file){
+  const box=$(`status${personIndex}`); box.className='status'; box.textContent='Leyendo y validando roster…';
+  const audit=$(`audit${personIndex}`); if(audit){audit.className='import-audit';audit.innerHTML='';}
+  try{
+    const text=file.name.toLowerCase().endsWith('.pdf')?await extractPdfText(file):await file.text();
+    const parsed=RosterParser.parseCrewLinkText(text);
+    renderImportAudit(personIndex,parsed);
+    const detected=validateBeforeMerge(parsed);
+    const count=mergeParsed(personIndex,parsed,file.name);
+    box.className='status ok'; box.textContent=`✓ ${count} servicios importados · ${parsed.coverage?.complete?'totales reconciliados':'cobertura parcial'} · otros meses conservados · ${file.name}`;
+    return {ok:true,message:box.textContent};
+  }catch(e){box.className='status err';box.textContent='⚠️ '+e.message;return {ok:false,message:box.textContent};}
+}
+
+async function handleFiles(personIndex,files){
+  const input=$(`file${personIndex}`);if(input.disabled)return;input.disabled=true;
+  try{const results=[];for(const file of Array.from(files))results.push(await handleFile(personIndex,file));
+    const box=$(`status${personIndex}`);box.className='status '+(results.every(r=>r.ok)?'ok':'err');box.textContent=results.map(r=>r.message).join('\n');
+  }finally{input.disabled=false;input.value='';}
+}
+
+function syncInputs(){
+  $('name0').value=state.people[0].name||''; $('name1').value=state.people[1].name||'';
+  Object.keys(state.rules).forEach(k=>{if($(k))$(k).value=state.rules[k];});
+}
+function readRules(){
+  ['homeTz','lunchTime','dinnerTime'].forEach(k=>state.rules[k]=$(k).value.trim());
+  ['sleepHours','quietLead','commuteOut','commuteHome','longDuty','veryLongDuty','partialRecovery','fullRecovery','mealFlex'].forEach(k=>state.rules[k]=Number($(k).value));
+  saveState(); renderCalendar();
+}
+
+function shiftPeriod(delta){
+  if(state.calendarMode==='month'){
+    let [y,m]=state.month.split('-').map(Number);m+=delta;while(m<1){m+=12;y--}while(m>12){m-=12;y++}
+    state.month=`${y}-${String(m).padStart(2,'0')}`; state.focusDate=`${state.month}-01`;
+  }else{
+    state.focusDate=addDaysKey(state.focusDate,delta*(state.calendarMode==='week'?7:1)); state.month=state.focusDate.slice(0,7);
+  }
+  saveState(); renderCalendar();
+}
+function setCalendarMode(mode){
+  if(!['month','week','day'].includes(mode) || state.calendarMode===mode)return;
+  if(state.calendarMode==='month' && mode!=='month'){
+    const today=dayKey(new Date()); state.focusDate=today.startsWith(state.month)?today:`${state.month}-01`;
+  }
+  state.calendarMode=mode; state.month=state.focusDate.slice(0,7); saveState(); queueCalendarRender();
+}
+function goToday(){ state.focusDate=dayKey(new Date()); state.month=state.focusDate.slice(0,7); saveState(); queueCalendarRender(); }
+function openDay(key){ state.focusDate=key; state.month=key.slice(0,7); state.calendarMode='day'; saveState(); queueCalendarRender(); }
+
+function icsStamp(d){return new Date(d).toISOString().replace(/[-:]/g,'').replace(/\.\d{3}/,'');}
+function icsEscape(s){return String(s).replace(/\\/g,'\\\\').replace(/\n/g,'\\n').replace(/,/g,'\\,').replace(/;/g,'\\;');}
+function exportIcs(){
+  const derived=allDerived().filter(e=>['sleep','recovery','quiet'].includes(e.kind)); const [y,m]=state.month.split('-').map(Number); const days=new Date(y,m,0).getDate();
+  const couple=[]; for(let d=1;d<=days;d++){const key=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;const w=coupleWindowForDay(key,allDerived());if(w)couple.push({kind:'couple',person:null,start:w.start,end:w.end,label:'❤️ Ventana juntos'});}
+  const events=[...derived,...couple]; let ics='BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//RosterHome//ES\r\nCALSCALE:GREGORIAN\r\n';
+  events.forEach((e,i)=>{const p=e.person==null?'':` · ${state.people[e.person].name}`;ics+=`BEGIN:VEVENT\r\nUID:${Date.now()}-${i}@rosterhome\r\nDTSTAMP:${icsStamp(new Date())}\r\nDTSTART:${icsStamp(e.start)}\r\nDTEND:${icsStamp(e.end)}\r\nSUMMARY:${icsEscape(e.label+p)}\r\nEND:VEVENT\r\n`;}); ics+='END:VCALENDAR\r\n';
+  const blob=new Blob([ics],{type:'text/calendar;charset=utf-8'}); const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`RosterHome-${state.month}.ics`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+
+// UI wiring — v0.3.2.3 validated binding
+function on(el,event,handler,options){
+  if(el && typeof el.addEventListener==='function') el.addEventListener(event,handler,options);
+}
+
+document.querySelectorAll('.tab').forEach(b=>on(b,'click',()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  const target=$(b.dataset.view); if(target) target.classList.add('active');
+  if(b.dataset.view==='summaryView' && typeof renderSummary==='function') setTimeout(()=>{try{renderSummary();}catch(e){console.error(e)}},0);
+  if(b.dataset.view==='ftlView' && typeof renderFtl==='function') setTimeout(()=>{try{renderFtl();}catch(e){console.error(e)}},0);
+}));
+document.querySelectorAll('[data-calendar-mode]').forEach(b=>on(b,'click',()=>{try{setCalendarMode(b.dataset.calendarMode);}catch(e){console.error(e)}}));
+document.querySelectorAll('[data-calendar-density]').forEach(b=>on(b,'click',()=>{
+  try{if(state.calendarDensity===b.dataset.calendarDensity)return;state.calendarDensity=b.dataset.calendarDensity;saveState();queueCalendarRender();}catch(e){console.error(e)}
+}));
+[0,1].forEach(i=>{
+  on($(`file${i}`),'change',e=>e.target.files?.length&&handleFiles(i,e.target.files));
+  on($(`name${i}`),'change',e=>{try{state.people[i].name=e.target.value.trim()||`Perfil ${i+1}`;saveState();renderCalendar();}catch(err){console.error(err)}});
+});
+document.querySelectorAll('[data-clear]').forEach(b=>on(b,'click',()=>{try{const i=Number(b.dataset.clear);state.people[i].duties=[];state.people[i].coverage=[];state.people[i].crewCode=null;state.people[i].homeBase=null;state.people[i].source=null;saveState();if($(`status${i}`))$(`status${i}`).textContent='Roster borrado.';if($(`audit${i}`))$(`audit${i}`).innerHTML='';renderCalendar();}catch(e){console.error(e)}}));
+on($('ftlMonth'),'change',e=>{if(/^\d{4}-\d{2}$/.test(e.target.value)){state.ftlMonth=e.target.value;saveState();renderFtl();}});
+on($('importText'),'click',()=>{try{const i=Number($('pastePerson').value),parsed=RosterParser.parseCrewLinkText($('pasteText').value);renderImportAudit(i,parsed);validateBeforeMerge(parsed);const n=mergeParsed(i,parsed,'texto pegado');$('pasteText').value='';alert(`${n} duties importados y validados.`);}catch(e){alert(e.message);}});
+on($('saveRules'),'click',()=>{try{new Intl.DateTimeFormat('es',{timeZone:$('homeTz').value}).format();readRules();alert('Reglas guardadas.');}catch(e){alert('Zona horaria no válida. Usa, por ejemplo, Europe/Athens o Europe/Madrid.');}});
+on($('prevMonth'),'click',()=>{try{shiftPeriod(-1)}catch(e){console.error(e)}});
+on($('nextMonth'),'click',()=>{try{shiftPeriod(1)}catch(e){console.error(e)}});
+on($('todayBtn'),'click',()=>{try{goToday()}catch(e){console.error(e)}});
+on($('exportIcs'),'click',()=>{try{exportIcs()}catch(e){console.error(e)}});
+on($('calendar'),'click',e=>{try{const eventBtn=e.target.closest('[data-event-id]');if(eventBtn){openEventDetails(eventBtn.dataset.eventId);return;}const dayBtn=e.target.closest('[data-open-day]');if(dayBtn)openDay(dayBtn.dataset.openDay);}catch(err){console.error(err)}});
+document.querySelectorAll('[data-close-modal]').forEach(x=>on(x,'click',closeEventDetails));
+on(document,'keydown',e=>{if(e.key==='Escape'&&$('eventModal')&&!$('eventModal').classList.contains('hidden'))closeEventDetails();});
+
+// Navigation is bound once above. Keep a single source of truth for taps.
+try{syncInputs();}catch(err){console.error('[RosterHome] No se pudieron sincronizar inputs',err);}
+try{renderCalendar();}catch(err){console.error('[RosterHome] Render inicial en fallback',err);}
+if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./service-worker.js?v=0.3.7',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{});
