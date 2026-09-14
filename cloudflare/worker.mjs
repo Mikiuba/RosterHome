@@ -12,6 +12,56 @@ function attrs(tag){return Object.fromEntries([...tag.matchAll(/([\w:-]+)\s*=\s*
 export function forms(html){
   return [...html.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form\s*>/gi)].map(m=>({action:attrs(m[1]).action||'clApp',fields:Object.fromEntries([...m[2].matchAll(/<input\b[^>]*>/gi)].map(x=>attrs(x[0])).filter(a=>a.name).map(a=>[a.name,a.value||'']))}));
 }
+function diagnosticSummary(html,username=''){
+  let normalized=decode(String(html||'')).replace(/\\\//g,'/');
+  const redact=(value)=>{
+    let out=String(value||'');
+    if(username){
+      const esc=username.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+      out=out.replace(new RegExp(esc,'gi'),'[USER]');
+    }
+    out=out
+      .replace(/(crewlinkPassword(?:%3D|=))[^^&\s"'<>]*/gi,'$1[REDACTED]')
+      .replace(/(crewlinkUserName(?:%3D|=))[^^&\s"'<>]*/gi,'$1[USER]')
+      .replace(/(password\s*[:=]\s*)[^&\s"'<>]+/gi,'$1[REDACTED]');
+    return out;
+  };
+  normalized=redact(normalized);
+
+  const formInfo=forms(normalized).slice(0,6).map(f=>{
+    let action='';
+    try{action=new URL(f.action,REMOTE+'/crewlink/').pathname;}catch{action=String(f.action||'').split('?')[0];}
+    return `${action||'-'}[${Object.keys(f.fields).slice(0,12).join('|')||'-'}]`;
+  });
+  const hrefs=[...normalized.matchAll(/\b(?:href|src)\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/gi)]
+    .map(m=>m[1]||m[2]||m[3]||'')
+    .filter(Boolean)
+    .slice(0,12)
+    .map(v=>{
+      try{const u=new URL(v,REMOTE+'/crewlink/');return u.pathname+(u.searchParams.has('crewlinkOperation')?`?crewlinkOperation=${u.searchParams.get('crewlinkOperation')}`:'');}
+      catch{return String(v).split('?')[0].slice(0,120);}
+    });
+  const redirects=[...normalized.matchAll(/(?:document|window)?\.?location(?:\.href)?\s*=\s*["']([^"']+)["']/gi)]
+    .map(m=>m[1]).slice(0,6).map(v=>String(v).split('?')[0].slice(0,120));
+
+  const text=redact(normalized
+    .replace(/<!--[\s\S]*?-->/g,' ')
+    .replace(/<script\b[\s\S]*?<\/script\s*>/gi,' ')
+    .replace(/<style\b[\s\S]*?<\/style\s*>/gi,' ')
+    .replace(/<[^>]+>/g,' ')
+    .replace(/&nbsp;/gi,' ')
+    .replace(/\s+/g,' ')
+    .trim()).slice(0,900);
+
+  return {
+    len:String(html||'').length,
+    text:text||'-',
+    forms:formInfo.join(';')||'-',
+    refs:hrefs.join(';')||'-',
+    redirects:redirects.join(';')||'-'
+  };
+}
+
 export function pdfUrl(html){
   const normalized=decode(html).replace(/\\\//g,'/');
 
@@ -171,9 +221,8 @@ export async function crewlink(data,probe=false,transport=fetch){
       if(!forms(refreshed).some(f=>f.fields.crewlinkOperation==='makeReport'))throw new SafeError('CrewLink perdió el contexto del roster antes de generar el PDF.');
       report=await exchange('clApp',reportFields,false,dutyPage);
       try{pdf=pdfUrl(report);}catch{
-        const title=(report.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]||'').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0,80);
-        const flags=[`len=${report.length}`,`iframe=${/<iframe\b/i.test(report)?1:0}`,`viewer=${/viewer\.html/i.test(report)?1:0}`,`temp=${/\/crewlink\/temp\//i.test(report)?1:0}`,`login=${/crewlinkPassword/i.test(report)?1:0}`,`title=${title||'-'}`].join(',');
-        throw new SafeError(`CrewLink respondió al generar el roster, pero no pude localizar el PDF (${flags}).`);
+        const d=diagnosticSummary(report,data.username);
+        throw new SafeError(`CrewLink devolvió una página inesperada tras generar el roster. DIAG len=${d.len}; text=${JSON.stringify(d.text)}; forms=${JSON.stringify(d.forms)}; refs=${JSON.stringify(d.refs)}; redirects=${JSON.stringify(d.redirects)}.`);
       }
     }
 
@@ -193,7 +242,7 @@ export default {
   async fetch(request,env){
     const u=new URL(request.url);
     if(!u.pathname.startsWith('/api/'))return env.ASSETS.fetch(request);
-    if(u.pathname==='/api/crewlink/status'&&request.method==='GET')return json({available:true,mode:'cloud',configured:typeof env.ROSTERHOME_ACCESS_KEY==='string'&&env.ROSTERHOME_ACCESS_KEY.length>=32,version:'0.5.4'});
+    if(u.pathname==='/api/crewlink/status'&&request.method==='GET')return json({available:true,mode:'cloud',configured:typeof env.ROSTERHOME_ACCESS_KEY==='string'&&env.ROSTERHOME_ACCESS_KEY.length>=32,version:'0.5.5'});
     if(!['/api/crewlink/probe','/api/crewlink/sync'].includes(u.pathname))return json({error:'Ruta no encontrada.'},404);
     if(request.method!=='POST')return json({error:'Método no permitido.'},405);
     if(u.protocol!=='https:'||request.headers.get('Origin')!==u.origin)return json({error:'Origen no permitido.'},403);

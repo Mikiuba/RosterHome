@@ -1,4 +1,4 @@
-# RosterHome v0.5.4 — Cloudflare + GitHub
+# RosterHome v0.5.5 — Cloudflare + GitHub
 
 Actualización manual desde CrewLink, para usar desde navegador e iPhone sin mantener encendido el ordenador. Esta entrega está preparada para desplegar; todavía no está publicada ni se ha verificado la conexión desde la red de Cloudflare.
 
