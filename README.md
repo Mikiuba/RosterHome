@@ -1,4 +1,4 @@
-# RosterHome v0.5.7 — Cloudflare + GitHub
+# RosterHome v0.5.8 — Cloudflare + GitHub
 
 Actualización manual desde CrewLink, para usar desde navegador e iPhone sin mantener encendido el ordenador. Esta entrega está preparada para desplegar; todavía no está publicada ni se ha verificado la conexión desde la red de Cloudflare.
 
@@ -63,11 +63,25 @@ Pendiente: despliegue real con Wrangler, prueba de acceso Cloudflare → CrewLin
 - [Límites del plan Free](https://developers.cloudflare.com/workers/platform/limits/)
 
 
-## v0.5.7 — CrewLink session bootstrap fix
+## v0.5.8 — CrewLink session bootstrap fix
 
 The successful browser HAR shows that the login POST is referred from
 `crewlink.jsp?crewlinkOperation=crewlinkForCrew&resetSession=Y`.
-v0.5.7 now performs that GET in the same cookie jar before login, then replays
+v0.5.8 now performs that GET in the same cookie jar before login, then replays
 the browser sequence and the exact 5-field `makeReport` POST. This addresses
 the server-side `Individual Duty Plan Internal processing error` seen when
 authentication worked but the report context was incomplete.
+
+
+## v0.5.8 — transporte HTTP/1.1 sobre una única conexión TCP
+
+Esta versión deja de usar `fetch()` para hablar con el CrewLink legacy. En su lugar,
+abre una única conexión TCP a `crewlink.corendonairlines.com:8090` mediante
+`cloudflare:sockets` y escribe HTTP/1.1 directamente sobre esa conexión.
+
+Motivo: el HAR que sí funciona en Chrome usa una conexión HTTP keep-alive y peticiones
+con Content-Length fijo. Cloudflare Workers gestiona las conexiones de `fetch()` de forma
+automática y no permite controlar el header `Connection`. El nuevo transporte conserva
+la misma conexión desde el arranque de sesión hasta `makeReport`, replica los headers,
+cookies, Content-Length y secuencia de navegación, y luego descarga el PDF por esa misma
+conexión.
