@@ -91,10 +91,20 @@
     // Never let a configured briefing overlap the protected sleep window. If the
     // personal briefing starts before the normal leave-for-report time, it becomes
     // the earlier commitment that determines when preparation must begin.
-    const firstCommitment=briefing && briefing.start<reportReady ? briefing.start : reportReady;
+    const usesBriefing=Boolean(briefing && briefing.start<reportReady);
+    const firstCommitment=usesBriefing ? briefing.start : reportReady;
     const wake=new Date(firstCommitment.getTime()-minMs(prep));
     const start=new Date(wake.getTime()-ms(state.rules.sleepHours));
-    return {start,end:wake,quietStart:new Date(start.getTime()-minMs(state.rules.quietLead)),prep,firstCommitment};
+    return {
+      start,
+      end:wake,
+      quietStart:new Date(start.getTime()-minMs(state.rules.quietLead)),
+      prep,
+      firstCommitment,
+      firstCommitmentKind:usesBriefing?'briefing':'report-departure',
+      briefingAt:briefing?.start||null,
+      reportReady
+    };
   };
 
   allDerived=function(){
@@ -108,7 +118,19 @@
         if(b) events.push({kind:'briefing',person:pi,start:b.start,end:b.end,label:'Briefing',lead:b.lead,flight:b.flight,departure:b.departure,briefingAt:b.briefingAt,checkIn:b.checkIn,insideDuty:b.insideDuty,raw:d});
         const s=sleepForDuty(d,pi);
         if(s){
-          events.push({kind:'sleep',person:pi,start:s.start,end:s.end,label:`Sueño ${state.rules.sleepHours} h`,prep:s.prep,raw:d});
+          events.push({
+            kind:'sleep',
+            person:pi,
+            start:s.start,
+            end:s.end,
+            label:`Sueño ${state.rules.sleepHours} h`,
+            prep:s.prep,
+            firstCommitment:s.firstCommitment,
+            firstCommitmentKind:s.firstCommitmentKind,
+            briefingAt:s.briefingAt,
+            reportReady:s.reportReady,
+            raw:d
+          });
           if(state.rules.quietLead>0) events.push({kind:'quiet',person:pi,start:s.quietStart,end:s.start,label:'Quiet hours',raw:d});
         }
         const r=recoveryForDuty(d);
@@ -244,8 +266,13 @@
       return `${warning}<div class="detail-section detail-summary"><h3>En pocas palabras</h3>${detailRow('Persona',state.people[e.person].name)}${detailRow('Sector',sector)}${detailRow('Hora de briefing',localDateTime(e.briefingAt||e.start))}${detailRow('Salida primer vuelo (chocks)',localDateTime(e.departure))}${detailRow('C/I CrewLink',localDateTime(e.checkIn||e.raw?.checkIn))}${detailRow('Antelación configurada',`${e.lead} min`)}${detailRow('Base horaria del roster',sourceBasis)}</div><p class="detail-note">La hora de briefing se calcula siempre desde la salida del primer vuelo: <b>chocks − antelación configurada</b>. No se calcula desde el C/I.</p>`;
     }
     if(e.kind==='sleep'){
-      const report=e.raw?.checkIn?localDateTime(e.raw.checkIn):'—',prep=numericPersonRule('prepMinutes',e.person,0),warning=e.sleepConflict?`<div class="warning-box"><b>⚠️ Conflicto real detectado</b><br>Este bloque de sueño se solapa temporalmente con ${esc((e.conflictDuties||[]).join(', ')||'un duty')}. Revisa la importación o las reglas.</div>`:'';
-      return `${warning}<div class="detail-section"><h3>Qué indica</h3><p class="detail-explainer">Sueño protegido calculado hacia atrás desde la primera obligación previa al vuelo (briefing o salida hacia el report) y vuestro tiempo personal de preparación.</p>${detailRow('Persona',state.people[e.person].name)}${detailRow('Desde',localDateTime(e.start))}${detailRow('Despertar objetivo',localDateTime(e.end))}${detailRow('Sueño objetivo',`${state.rules.sleepHours} h`)}${detailRow('Preparación personal',`${prep} min`)}${detailRow('Trayecto a report',`${state.rules.commuteOut} min`)}${detailRow('Report relacionado',report)}${detailRow('Ruta relacionada',e.raw?.route||'Duty')}</div>`;
+      const report=e.raw?.checkIn?localDateTime(e.raw.checkIn):'—',
+        prep=numericPersonRule('prepMinutes',e.person,0),
+        firstKind=e.firstCommitmentKind==='briefing'?'Briefing':'Salida hacia el report',
+        firstAt=e.firstCommitment?localDateTime(e.firstCommitment):'—',
+        reportReady=e.reportReady?localDateTime(e.reportReady):'—',
+        warning=e.sleepConflict?`<div class="warning-box"><b>⚠️ Conflicto real detectado</b><br>Este bloque de sueño se solapa temporalmente con ${esc((e.conflictDuties||[]).join(', ')||'un duty')}. Revisa la importación o las reglas.</div>`:'';
+      return `${warning}<div class="detail-section"><h3>Qué indica</h3><p class="detail-explainer">Sueño protegido calculado hacia atrás desde la <b>primera obligación real</b> previa al vuelo y vuestro tiempo personal de preparación. La obligación que manda en este cálculo se muestra explícitamente abajo.</p>${detailRow('Persona',state.people[e.person].name)}${detailRow('Desde',localDateTime(e.start))}${detailRow('Despertar objetivo',localDateTime(e.end))}${detailRow('Sueño objetivo',`${state.rules.sleepHours} h`)}${detailRow('Preparación personal',`${prep} min`)}${detailRow('Primera obligación',firstKind)}${detailRow('Hora primera obligación',firstAt)}${detailRow('Salida hacia el report',reportReady)}${detailRow('Trayecto a report',`${state.rules.commuteOut} min`)}${detailRow('Report CrewLink',report)}${detailRow('Ruta relacionada',e.raw?.route||'Duty')}</div>`;
     }
     if(e.kind==='recovery'){
       return `${baseEventDetailHtml(e)}<div class="detail-section recovery-couple-note"><h3>❤️ Convivencia</h3><p class="detail-explainer">Este recovery <b>sí cuenta como tiempo potencial en casa juntos</b> si la otra persona también está disponible. Se muestra como una capa superpuesta porque estar juntos no elimina la necesidad de recovery.</p></div>`;

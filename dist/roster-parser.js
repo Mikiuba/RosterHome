@@ -116,11 +116,11 @@
     // Nicole's CrewLink local-time export prefixes times with ! when the event is in a
     // different timezone from the departure airport, and uses +1 for next day. Miguel's
     // UTC export has neither. Accept both without losing the markers.
-    const re=new RegExp('(?:^|\\n)\\s*(?:'+DAY_RE+'\\d{2}\\s+)?([A-Z0-9]{2,3})\\s+(\\d{1,4}[A-Z]?)\\s+([A-Z]{3})\\s+(!?)(\\d{4})(?:\\+(\\d+))?\\s+(!?)(\\d{4})(?:\\+(\\d+))?\\s+([A-Z]{3})\\s+([A-Z0-9]{3,5})\\b','gmi');
+    const re=new RegExp('(?:^|\\n)\\s*(?:'+DAY_RE+'\\d{2}\\s+)?([A-Z0-9]{2,3})\\s+(\\d{1,4}(?:\\s*[A-Z])?)\\s+([A-Z]{3})\\s+(!?)(\\d{4})(?:\\+(\\d+))?\\s+(!?)(\\d{4})(?:\\+(\\d+))?\\s+([A-Z]{3})\\s+([A-Z0-9]{3,5})\\b','gmi');
     const out=[];let m;
     while((m=re.exec(block))){
       // DAY_RE contributes capture 1, therefore flight captures start at 2.
-      const f={carrier:m[2],number:m[3],dep:m[4],depTime:m[6],depMarked:m[5]==='!',depDayOffset:Number(m[7]||0),arrTime:m[9],arrMarked:m[8]==='!',arrDayOffset:Number(m[10]||0),arr:m[11],aircraft:m[12]};
+      const f={carrier:m[2],number:m[3].replace(/\s+/g,''),dep:m[4],depTime:m[6],depMarked:m[5]==='!',depDayOffset:Number(m[7]||0),arrTime:m[9],arrMarked:m[8]==='!',arrDayOffset:Number(m[10]||0),arr:m[11],aircraft:m[12]};
       const key=[f.carrier,f.number,f.dep,f.depTime,f.depDayOffset,f.arrTime,f.arrDayOffset,f.arr].join('|');
       if(!out.some(x=>x._key===key)) out.push({...f,_key:key});
     }

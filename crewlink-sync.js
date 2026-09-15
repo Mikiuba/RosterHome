@@ -1,4 +1,4 @@
-/* RosterHome v0.6.1 — CrewLink runs locally in Chrome via the RosterHome Bridge extension.
+/* RosterHome v0.6.2 — CrewLink runs locally in Chrome via the RosterHome Bridge extension.
  * Credentials never transit Cloudflare. The extension opens CrewLink in the user's browser,
  * performs the same browser navigation as a manual download, and returns the PDF to this page.
  */

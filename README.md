@@ -1,4 +1,4 @@
-# RosterHome v0.6.1 — Cloudflare + CrewLink Bridge
+# RosterHome v0.6.2 — Cloudflare + CrewLink Bridge
 
 Esta versión cambia la arquitectura del importador de CrewLink.
 
@@ -12,7 +12,7 @@ Esto elimina el punto que estaba fallando: CrewLink aceptaba login y navegación
 
 1. Sube el contenido de este paquete al repositorio GitHub.
 2. Cloudflare compila con `npm run build` y despliega con `npx wrangler deploy`.
-3. Comprueba `/api/crewlink/status`; debe devolver `version: 0.6.1` y `transport: local-chrome-bridge`.
+3. Comprueba `/api/crewlink/status`; debe devolver `version: 0.6.2` y `transport: local-chrome-bridge`.
 
 ## Instalar el Bridge una vez en Windows/Chrome
 
@@ -35,7 +35,7 @@ La contraseña de CrewLink se usa dentro del Chrome local para completar la sesi
 La importación directa requiere Chrome de escritorio con la extensión instalada. En otros dispositivos sigue disponible la importación manual PDF/TXT.
 
 
-## v0.6.1 — sectores con sufijo separado
+## v0.6.2 — sectores con sufijo separado
 
 CrewLink puede imprimir números de vuelo como `CXI 22 P`. El parser anterior solo
 aceptaba el sufijo pegado (`22P`) y omitía ese sector. Esta versión acepta ambos
@@ -43,3 +43,11 @@ formatos y normaliza el número a `22P`.
 
 Esto corrige el conteo de sectores, la ruta y los cálculos FTL dependientes del
 número de sectores. FT/DT/FDP continúan tomándose de los totales oficiales de CrewLink.
+
+
+## v0.6.2 — claridad del cálculo de sueño
+
+La ficha de sueño protegido muestra ahora explícitamente qué obligación determina
+el despertar: `Briefing` o `Salida hacia el report`, junto con su hora. También
+separa `Salida hacia el report` de `Report CrewLink`, para que el cálculo pueda
+auditarse visualmente sin tener que inferirlo.

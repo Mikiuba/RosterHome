@@ -1,4 +1,4 @@
-const VERSION='0.6.0';
+const VERSION='0.6.2';
 function json(body,status=200){
   return new Response(JSON.stringify(body),{
     status,
