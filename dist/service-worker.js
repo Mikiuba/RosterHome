@@ -1,4 +1,4 @@
-const CACHE='rosterhome-v0.7.0';
+const CACHE='rosterhome-v0.8.0';
 const FALLBACKS=['./index.html','./styles.css','./roster-parser.js','./roster-history.js','./ftl-engine.js','./app.js','./enhancements.js','./storage.js','./manifest.webmanifest'];
 
 self.addEventListener('install',event=>{

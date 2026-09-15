@@ -3,9 +3,9 @@
   "short_name": "RosterHome",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#0b1020",
-  "theme_color": "#0b1020",
-  "description": "Calendario conjunto para tripulaciones: roster, sueño protegido, recovery y tiempo en pareja.",
+  "background_color": "#080c18",
+  "theme_color": "#080c18",
+  "description": "RosterHome: rosters, FTL y tiempo juntos para organizar la vida de dos tripulantes.",
   "scope": "./",
   "display_override": [
     "standalone",

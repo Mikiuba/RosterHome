@@ -1,4 +1,4 @@
-const VERSION='0.7.0';
+const VERSION='0.8.0';
 const START='http://crewlink.corendonairlines.com:8090/crewlink/crewlink.jsp?crewlinkOperation=crewlinkForCrew&resetSession=Y';
 const DUTY='http://crewlink.corendonairlines.com:8090/crewlink/clApp?crewlinkService=individualDutyPlan&crewlinkOperation=default&crewlinkSourcePage=spCrew';
 const ORIGIN='http://crewlink.corendonairlines.com:8090';
@@ -72,7 +72,7 @@ async function acquireCdp(env){
   const acquire=await env.BROWSER.fetch(`${host}/v1/devtools/browser?`,{method:'POST'});
   if(!acquire.ok)throw Error(`Cloudflare Browser Run respondió HTTP ${acquire.status}.`);
   const info=await acquire.json();if(!info?.sessionId)throw Error('Cloudflare no devolvió una sesión de navegador.');
-  const upgrade=await env.BROWSER.fetch(`${host}/v1/devtools/browser/${encodeURIComponent(info.sessionId)}`,{headers:{Upgrade:'websocket','cf-brapi-client':'RosterHome/0.7.0'}});
+  const upgrade=await env.BROWSER.fetch(`${host}/v1/devtools/browser/${encodeURIComponent(info.sessionId)}`,{headers:{Upgrade:'websocket','cf-brapi-client':'RosterHome/0.8.0'}});
   if(!upgrade.webSocket)throw Error(`No se pudo abrir el canal de control del navegador remoto (HTTP ${upgrade.status}).`);
   const ws=upgrade.webSocket;ws.accept();const cdp=new CdpClient(ws);
   const {targetId}=await cdp.send('Target.createTarget',{url:'about:blank'});

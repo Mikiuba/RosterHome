@@ -1,4 +1,4 @@
-# RosterHome v0.7.0 — iPhone Direct + Windows Bridge
+# RosterHome v0.8.0 — iPhone Direct + Windows Bridge
 
 Esta versión permite actualizar CrewLink directamente desde iPhone/Safari sin depender del PC.
 
@@ -38,3 +38,28 @@ Los rosters permanecen almacenados en el dispositivo, como hasta ahora. En el mo
 ## Offline
 
 La instalación como PWA y el service worker están preparados, pero **v0.7.0 no promete todavía modo offline completo**. Esa parte queda para una versión posterior, tal como se acordó.
+
+
+## v0.8.0 — Together
+
+`Resumen` pasa a llamarse `Juntos` y está pensado para que cualquiera de los dos
+pueda organizarse sin interpretar un roster: noches de cita, tiempo de calidad,
+horas juntos, mañanas y cenas, dormir juntos, días completos, escapadas y días
+que conviene coordinar.
+
+Cada tarjeta abre un panel superpuesto (bottom sheet en iPhone), con fechas
+deduplicadas y un lenguaje deliberadamente cotidiano. Los días con recovery
+pueden seguir contando como tiempo potencial juntos, pero se señalan.
+
+Noche de cita:
+- podéis empezar como tarde a las 21:00 (configurable);
+- ninguno tiene una obligación antes de las 12:00 locales del día siguiente
+  (configurable);
+- exige cobertura de roster para ambos en los dos días.
+
+Pulido iPhone:
+- safe area superior real;
+- fondo de la barra de estado integrado con la app;
+- cabecera separada de la hora/Dynamic Island;
+- pestañas móviles más limpias;
+- theme/background PWA coherentes.

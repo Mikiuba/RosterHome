@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <meta name="theme-color" content="#0b1020" />
+  <meta name="theme-color" content="#080c18" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="RosterHome" />
   <title>RosterHome</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=0.7.0" />
+  <link rel="stylesheet" href="styles.css?v=0.8.0" />
 </head>
 <body>
 <div class="app">
@@ -23,7 +23,7 @@
     <button class="tab" data-view="importView">Importar roster</button>
     <button class="tab" data-view="ftlView">FTL</button>
     <button class="tab" data-view="rulesView">Reglas</button>
-    <button class="tab" data-view="summaryView">Resumen</button>
+    <button class="tab" data-view="summaryView">Juntos</button>
   </nav>
 
   <section id="calendarView" class="view active">
@@ -239,6 +239,13 @@
       </div>
       <p class="rules-help muted">El briefing se calcula como <b>hora de salida (chocks) del primer vuelo − X minutos</b>; nunca desde el inicio del duty/C/I. El sueño protegido se ajusta a ese briefing o, si fuese anterior, a la salida hacia el report, además del tiempo personal de preparación de cada uno.</p>
 
+      <h3 class="rules-subtitle">Tiempo juntos</h3>
+      <div class="rulegrid">
+        <div><label>Noche de cita · libres como tarde desde</label><input id="dateNightLatestStart" type="time" value="21:00"></div>
+        <div><label>Noche de cita · libres hasta al menos</label><input id="dateNightUntil" type="time" value="12:00"></div>
+      </div>
+      <p class="rules-help muted">Una noche de cita cuenta cuando ambos podéis empezar el plan, como tarde, a la hora indicada y no aparece ninguna obligación de ninguno antes de la hora configurada del día siguiente. Recovery puede seguir contando como tiempo juntos, pero RosterHome lo avisará en el detalle.</p>
+
       <h3 class="rules-subtitle">Recovery y horarios de casa</h3>
       <div class="rulegrid">
         <div><label>Duty largo desde (h)</label><input id="longDuty" type="number" min="8" max="16" step="0.5" value="10"></div>
@@ -272,23 +279,33 @@
   </section>
 
   <section id="summaryView" class="view">
-    <div class="card summary-intro">
-      <h2>📊 Resumen del mes</h2>
-      <p class="muted">Las tarjetas son interactivas. Toca una estadística —incluidas comida y cena por separado— para ver exactamente qué días la forman y abrirlos en el calendario.</p>
+    <div class="card together-hero">
+      <div class="together-hero-copy">
+        <span class="together-eyebrow">VUESTRA VIDA FUERA DEL ROSTER</span>
+        <h2 id="togetherTitle">💜 Tiempo juntos</h2>
+        <p id="togetherSubtitle">Lo importante primero: cuándo podéis veros, hacer planes y descansar sin mirar veinte horarios.</p>
+      </div>
+      <div class="together-month" id="togetherMonth"></div>
     </div>
-    <div class="stats summary-stats" id="stats" style="margin-top:12px"></div>
-    <div class="card summary-drill-card" style="margin-top:12px">
-      <h3 id="summaryDrillTitle">Detalle</h3>
-      <div id="summaryDrilldown" class="summary-list"></div>
+
+    <div class="together-section-head">
+      <div>
+        <h3>Este mes, de un vistazo</h3>
+        <p>Toca cualquier apartado. El detalle se abre encima, puedes recorrerlo y cerrarlo cuando termines.</p>
+      </div>
     </div>
-    <div class="grid two" style="margin-top:16px">
-      <div class="card"><h3>❤️ Mejores ventanas juntos</h3><div id="bestWindows" class="summary-list"></div></div>
-      <div class="card"><h3>⚠️ Días que requieren coordinación</h3><div id="coordination" class="summary-list"></div></div>
+    <div class="stats together-stats" id="stats"></div>
+
+    <div class="card together-footnote">
+      <span>✨</span>
+      <div>
+        <b>Sin duplicados ni jerga innecesaria.</b>
+        <p>Las fechas aparecen una sola vez dentro de cada apartado. Recovery cuenta como tiempo potencial juntos, pero se marca para que sepáis que ese rato también toca cuidarse.</p>
+      </div>
     </div>
-    <div class="card" style="margin-top:16px"><h3>⚖️ Carga del mes</h3><p class="muted">Comparación rápida para ver quién llega con más carga, noches o recoveries.</p><div id="workloadCompare" class="workload-compare"></div></div>
   </section>
 
-  <div class="footer">MVP local · RosterHome v0.7.0 · Motor FTL OM-A core activo.</div>
+  <div class="footer">RosterHome v0.8.0 · Together · Motor FTL OM-A core activo.</div>
 </div>
 
 <div id="eventModal" class="modal hidden" aria-hidden="true">
@@ -305,14 +322,30 @@
   </section>
 </div>
 
+<div id="summarySheet" class="summary-sheet hidden" aria-hidden="true">
+  <div class="summary-sheet-backdrop" data-close-summary-sheet></div>
+  <section class="summary-sheet-card" role="dialog" aria-modal="true" aria-labelledby="summarySheetTitle">
+    <div class="summary-sheet-grabber" aria-hidden="true"></div>
+    <div class="summary-sheet-head">
+      <div>
+        <div class="summary-sheet-kicker" id="summarySheetKicker">JUNTOS</div>
+        <h2 id="summarySheetTitle">Detalle</h2>
+        <p id="summarySheetSubtitle"></p>
+      </div>
+      <button class="summary-sheet-close" type="button" data-close-summary-sheet aria-label="Cerrar">×</button>
+    </div>
+    <div id="summarySheetBody" class="summary-sheet-body"></div>
+  </section>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="storage.js?v=0.7.0"></script>
-<script src="roster-parser.js?v=0.7.0"></script>
-<script src="roster-history.js?v=0.7.0"></script>
-<script src="ftl-engine.js?v=0.7.0"></script>
-<script src="app.js?v=0.7.0"></script>
-<script src="enhancements.js?v=0.7.0"></script>
-<script src="crewlink-changes.js?v=0.7.0"></script>
-<script src="crewlink-sync.js?v=0.7.0"></script>
+<script src="storage.js?v=0.8.0"></script>
+<script src="roster-parser.js?v=0.8.0"></script>
+<script src="roster-history.js?v=0.8.0"></script>
+<script src="ftl-engine.js?v=0.8.0"></script>
+<script src="app.js?v=0.8.0"></script>
+<script src="enhancements.js?v=0.8.0"></script>
+<script src="crewlink-changes.js?v=0.8.0"></script>
+<script src="crewlink-sync.js?v=0.8.0"></script>
 </body>
 </html>

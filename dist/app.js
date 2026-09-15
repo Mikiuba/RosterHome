@@ -6,7 +6,8 @@ const DEFAULT_STATE = {
   rules:{
     homeTz:'Europe/Athens', sleepHours:8, quietLead:30, commuteOut:0, commuteHome:0,
     longDuty:10, veryLongDuty:12, partialRecovery:6, fullRecovery:12,
-    lunchTime:'14:00', dinnerTime:'20:30', mealFlex:60
+    lunchTime:'14:00', dinnerTime:'20:30', mealFlex:60,
+    dateNightLatestStart:'21:00', dateNightUntil:'12:00'
   },
   month:new Date().toISOString().slice(0,7),
   calendarMode:'month',
@@ -17,7 +18,7 @@ const DEFAULT_STATE = {
 let BOOT_LOCAL_RAW=null;
 try{BOOT_LOCAL_RAW=localStorage.getItem('rosterhome-state');}catch(_){ }
 const BOOT_HAD_LOCAL_STATE = !!BOOT_LOCAL_RAW;
-const STATE_SCHEMA_VERSION = 9;
+const STATE_SCHEMA_VERSION = 10;
 let durableStorageReady = false;
 let state = loadState();
 let renderedEvents = new Map();
@@ -1044,4 +1045,4 @@ on(document,'keydown',e=>{if(e.key==='Escape'&&$('eventModal')&&!$('eventModal')
 // Navigation is bound once above. Keep a single source of truth for taps.
 try{syncInputs();}catch(err){console.error('[RosterHome] No se pudieron sincronizar inputs',err);}
 try{renderCalendar();}catch(err){console.error('[RosterHome] Render inicial en fallback',err);}
-if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./service-worker.js?v=0.3.7',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{});
+if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./service-worker.js?v=0.8.0',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{});
