@@ -1,53 +1,40 @@
-# RosterHome v0.6.2 — Cloudflare + CrewLink Bridge
+# RosterHome v0.7.0 — iPhone Direct + Windows Bridge
 
-Esta versión cambia la arquitectura del importador de CrewLink.
+Esta versión permite actualizar CrewLink directamente desde iPhone/Safari sin depender del PC.
 
-## Solución
+## Cómo funciona
 
-CrewLink ya no se consulta desde Cloudflare. El informe se genera en el Chrome local mediante la extensión `chrome-extension/`.
+- **iPhone / Safari:** RosterHome crea un navegador Chromium temporal y headless en Cloudflare Browser Run. Ese navegador entra en CrewLink, genera el Individual Duty Plan, descarga el PDF y lo devuelve a RosterHome. No se abre ninguna pestaña de CrewLink en el iPhone.
+- **Windows / Chrome:** si está instalada la extensión `RosterHome CrewLink Bridge`, RosterHome sigue prefiriendo el Bridge local que ya funciona.
+- La importación muestra una **barra de progreso con fases reales**: navegador, login, Duty Plan, generación, descarga, parsing y actualización.
 
-Esto elimina el punto que estaba fallando: CrewLink aceptaba login y navegación desde Cloudflare, pero su generador de Individual Duty Plan devolvía `Internal processing error`. En el navegador local, el mismo flujo sí genera el PDF.
+## Despliegue
 
-## Despliegue de RosterHome
+1. Sube **todo el contenido** de este paquete a la raíz del repositorio GitHub.
+2. Cloudflare ejecuta `npm run build` y `npx wrangler deploy`.
+3. `wrangler.jsonc` ya incluye el binding de Browser Run (`BROWSER`), por lo que no hay que editar código ni añadirlo a mano.
+4. Mantén el secret de runtime existente `ROSTERHOME_ACCESS_KEY` (mínimo 32 caracteres). Es la clave privada que protege el uso del navegador remoto.
+5. Comprueba `/api/crewlink/status`. Debe mostrar `version: 0.7.0`, `cloudBrowser: true` y `transport: cloud-browser+local-bridge`.
 
-1. Sube el contenido de este paquete al repositorio GitHub.
-2. Cloudflare compila con `npm run build` y despliega con `npx wrangler deploy`.
-3. Comprueba `/api/crewlink/status`; debe devolver `version: 0.6.2` y `transport: local-chrome-bridge`.
+## Uso en iPhone
 
-## Instalar el Bridge una vez en Windows/Chrome
-
-1. Conserva una copia descomprimida de este paquete en Windows.
-2. Puedes hacer doble clic en `INSTALL-BRIDGE.cmd` para abrir la carpeta y `chrome://extensions`, o hacerlo manualmente.
-3. Abre `chrome://extensions`.
-4. Activa **Modo de desarrollador**.
-5. Pulsa **Cargar descomprimida / Load unpacked**.
-6. Selecciona la carpeta `chrome-extension`.
-7. Recarga RosterHome.
-
-En **Importar roster** debe aparecer `Bridge local detectado`.
+1. Abre la URL `workers.dev` de RosterHome en Safari.
+2. En **Importar roster** debe aparecer `Importación directa disponible`.
+3. Introduce una vez la `ROSTERHOME_ACCESS_KEY` (puedes marcar “Recordar esta clave”).
+4. Introduce usuario y contraseña de CrewLink, periodo y pulsa **Actualizar desde CrewLink**.
+5. La contraseña de CrewLink se vacía al terminar. No se guarda en RosterHome.
+6. Opcional: Safari → Compartir → **Añadir a pantalla de inicio** para usar RosterHome como PWA.
 
 ## Privacidad
 
-La contraseña de CrewLink se usa dentro del Chrome local para completar la sesión y se borra de la interfaz al terminar. No se envía a Cloudflare.
+Los rosters permanecen almacenados en el dispositivo, como hasta ahora. En el modo iPhone, las credenciales de CrewLink viajan por HTTPS desde RosterHome al Worker únicamente para esa importación y se usan dentro de una sesión temporal de Browser Run; RosterHome no las persiste. La `ROSTERHOME_ACCESS_KEY` puede guardarse localmente en el dispositivo si el usuario lo elige.
 
-## Limitación actual
+## Correcciones conservadas
 
-La importación directa requiere Chrome de escritorio con la extensión instalada. En otros dispositivos sigue disponible la importación manual PDF/TXT.
+- `CXI 22 P` se interpreta correctamente como `22P`, evitando perder sectores.
+- El 29 SEP se reconstruye como HER–GRZ–DRS–HER (3 sectores) y conserva los totales oficiales de CrewLink.
+- El detalle de sueño muestra explícitamente la primera obligación que determina el despertar.
 
+## Offline
 
-## v0.6.2 — sectores con sufijo separado
-
-CrewLink puede imprimir números de vuelo como `CXI 22 P`. El parser anterior solo
-aceptaba el sufijo pegado (`22P`) y omitía ese sector. Esta versión acepta ambos
-formatos y normaliza el número a `22P`.
-
-Esto corrige el conteo de sectores, la ruta y los cálculos FTL dependientes del
-número de sectores. FT/DT/FDP continúan tomándose de los totales oficiales de CrewLink.
-
-
-## v0.6.2 — claridad del cálculo de sueño
-
-La ficha de sueño protegido muestra ahora explícitamente qué obligación determina
-el despertar: `Briefing` o `Salida hacia el report`, junto con su hora. También
-separa `Salida hacia el report` de `Report CrewLink`, para que el cálculo pueda
-auditarse visualmente sin tener que inferirlo.
+La instalación como PWA y el service worker están preparados, pero **v0.7.0 no promete todavía modo offline completo**. Esa parte queda para una versión posterior, tal como se acordó.
