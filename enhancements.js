@@ -292,7 +292,12 @@
   };
   function simpleStatusHtml(key,derived,context='month'){
     const s=dayPlanStatus(key,derived),time=s.best?`${timeLocal(s.best.start)}–${timeLocal(s.best.end)}`:'',hasRecovery=!!s.recoveryOverlays?.length;
-    return `<button type="button" class="simple-day-status ${s.level} ${context}" data-open-day="${key}"><span class="simple-status-main">${s.emoji} ${esc(s.label)}</span>${time?`<span class="simple-status-time">${esc(time)}</span>`:''}${hasRecovery?'<span class="simple-status-overlay">+ recovery</span>':''}</button>`;
+    const shortLabel=s.level==='together'?'Juntos':s.level==='partial'?'Un rato':s.level==='busy'?'Ocupado':'Sin datos';
+    return `<button type="button" class="simple-day-status ${s.level} ${context}" data-open-day="${key}" data-mobile-day="${key}">
+      <span class="simple-status-main"><span class="simple-status-emoji">${s.emoji}</span><span class="simple-status-label"><span class="simple-status-full">${esc(s.label)}</span><span class="simple-status-short">${esc(shortLabel)}</span></span></span>
+      ${time?`<span class="simple-status-time">${esc(time)}</span>`:''}
+      ${hasRecovery?'<span class="simple-status-recovery" title="Incluye recovery">↻</span>':''}
+    </button>`;
   }
 
   renderMonthCalendar=function(derived){
@@ -490,7 +495,7 @@
   }
 
   /* =========================================================
-     RosterHome v0.8.0 · Together
+     RosterHome v0.8.1 · Together
      ========================================================= */
   function rhBothRostersReady(){
     return state.people.every(p=>(p.duties||[]).length>0);
@@ -717,5 +722,92 @@
     }
   });
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('summarySheet')?.classList.contains('hidden'))rhCloseSummarySheet();});
+
+
+  /* =========================================================
+     v0.8.1 · Mobile calendar polish
+     ========================================================= */
+  function rhAvailableMonths(){
+    const set=new Set([state.month]);
+    state.people.forEach(p=>{
+      (p.duties||[]).forEach(d=>{
+        const key=String(d.date||d.sourceCheckInDate||'');
+        if(/^\d{4}-\d{2}/.test(key))set.add(key.slice(0,7));
+      });
+      (p.coverage||[]).forEach(c=>{
+        if(/^\d{4}-\d{2}/.test(String(c.start||'')))set.add(String(c.start).slice(0,7));
+        if(/^\d{4}-\d{2}/.test(String(c.end||'')))set.add(String(c.end).slice(0,7));
+      });
+    });
+    return [...set].sort();
+  }
+  function rhPopulateTogetherMonthSelect(){
+    const sel=$('togetherMonthSelect'); if(!sel)return;
+    const months=rhAvailableMonths();
+    sel.innerHTML=months.map(m=>`<option value="${m}" ${m===state.month?'selected':''}>${esc(monthLabel(m))}</option>`).join('');
+  }
+  $('togetherMonthSelect')?.addEventListener('change',()=>{
+    const val=$('togetherMonthSelect').value;
+    if(!/^\d{4}-\d{2}$/.test(val))return;
+    state.month=val;
+    state.focusDate=`${val}-01`;
+    saveState();
+    try{queueCalendarRender();}catch(_){}
+    renderSummary();
+  });
+
+  function rhOpenMobileDaySheet(key){
+    if(!matchMedia('(max-width:560px)').matches || state.calendarMode!=='month' || state.calendarDensity!=='simple'){
+      openDay(key); return;
+    }
+    const derived=allDerived(),s=dayPlanStatus(key,derived),sheet=$('mobileDaySheet');
+    if(!sheet)return;
+    const dinner=mealWindowForDay(key,state.rules.dinnerTime,derived);
+    const sleep=rhSleepTogether?rhSleepTogether(key,derived):null;
+    const rec=s.recoveryOverlays?.length?recoveryOverlayLabel(s.best,derived):'';
+    $('mobileDayTitle').textContent=localDayLabel(key,{weekday:'long',day:'numeric',month:'long'});
+    $('mobileDaySubtitle').textContent=s.detail||'';
+    $('mobileDayBody').innerHTML=`
+      <div class="mobile-day-hero ${s.level}">
+        <span class="mobile-day-hero-icon">${s.emoji}</span>
+        <div><b>${esc(s.label)}</b>${s.best?`<small>${esc(timeLocal(s.best.start))}–${esc(timeLocal(s.best.end))}</small>`:''}</div>
+      </div>
+      ${rec?`<div class="mobile-day-note">↻ ${esc(rec)}</div>`:''}
+      <div class="mobile-day-grid">
+        <div><span>Tiempo potencial</span><b>${s.totalHours?`${s.totalHours.toFixed(1)} h`:'—'}</b></div>
+        <div><span>Cena juntos</span><b>${dinner?'Sí':'No'}</b></div>
+        <div><span>Dormir juntos</span><b>${sleep?'Sí':'No'}</b></div>
+      </div>
+      <button class="btn primary mobile-day-open-full" type="button" data-open-full-day="${key}">Ver día completo</button>
+    `;
+    sheet.classList.remove('hidden');sheet.setAttribute('aria-hidden','false');document.body.classList.add('modal-open');
+  }
+  function rhCloseMobileDaySheet(){
+    const sheet=$('mobileDaySheet');if(!sheet)return;
+    sheet.classList.add('hidden');sheet.setAttribute('aria-hidden','true');
+    if($('eventModal')?.classList.contains('hidden')&&$('summarySheet')?.classList.contains('hidden'))document.body.classList.remove('modal-open');
+  }
+  $('calendar')?.addEventListener('click',e=>{
+    const day=e.target.closest('[data-mobile-day],[data-open-day]');
+    if(!day)return;
+    if(matchMedia('(max-width:560px)').matches && state.calendarMode==='month' && state.calendarDensity==='simple'){
+      e.preventDefault();e.stopImmediatePropagation();
+      rhOpenMobileDaySheet(day.dataset.mobileDay||day.dataset.openDay);
+    }
+  },true);
+  $('mobileDaySheet')?.addEventListener('click',e=>{
+    if(e.target.closest('[data-close-mobile-day]')){rhCloseMobileDaySheet();return;}
+    const full=e.target.closest('[data-open-full-day]');
+    if(full){
+      rhCloseMobileDaySheet();
+      openDay(full.dataset.openFullDay);
+    }
+  });
+
+  const baseTogetherRenderSummary=renderSummary;
+  renderSummary=function(){
+    baseTogetherRenderSummary();
+    rhPopulateTogetherMonthSelect();
+  };
 
 })();

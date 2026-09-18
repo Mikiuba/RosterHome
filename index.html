@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="RosterHome" />
   <title>RosterHome</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=0.8.0" />
+  <link rel="stylesheet" href="styles.css?v=0.8.1" />
 </head>
 <body>
 <div class="app">
@@ -285,7 +285,10 @@
         <h2 id="togetherTitle">💜 Tiempo juntos</h2>
         <p id="togetherSubtitle">Lo importante primero: cuándo podéis veros, hacer planes y descansar sin mirar veinte horarios.</p>
       </div>
-      <div class="together-month" id="togetherMonth"></div>
+      <label class="together-month-select-wrap" aria-label="Mes a analizar">
+          <span>Mes</span>
+          <select id="togetherMonthSelect" class="together-month-select"></select>
+        </label>
     </div>
 
     <div class="together-section-head">
@@ -305,7 +308,7 @@
     </div>
   </section>
 
-  <div class="footer">RosterHome v0.8.0 · Together · Motor FTL OM-A core activo.</div>
+  <div class="footer">RosterHome v0.8.1 · Together · Motor FTL OM-A core activo.</div>
 </div>
 
 <div id="eventModal" class="modal hidden" aria-hidden="true">
@@ -338,14 +341,31 @@
   </section>
 </div>
 
+
+<div id="mobileDaySheet" class="summary-sheet hidden" aria-hidden="true">
+  <div class="summary-sheet-backdrop" data-close-mobile-day></div>
+  <section class="summary-sheet-card mobile-day-sheet-card" role="dialog" aria-modal="true" aria-labelledby="mobileDayTitle">
+    <div class="summary-sheet-grabber" aria-hidden="true"></div>
+    <div class="summary-sheet-head">
+      <div>
+        <div class="summary-sheet-kicker">CALENDARIO</div>
+        <h2 id="mobileDayTitle">Día</h2>
+        <p id="mobileDaySubtitle"></p>
+      </div>
+      <button class="summary-sheet-close" type="button" data-close-mobile-day aria-label="Cerrar">×</button>
+    </div>
+    <div id="mobileDayBody" class="summary-sheet-body"></div>
+  </section>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="storage.js?v=0.8.0"></script>
-<script src="roster-parser.js?v=0.8.0"></script>
-<script src="roster-history.js?v=0.8.0"></script>
-<script src="ftl-engine.js?v=0.8.0"></script>
-<script src="app.js?v=0.8.0"></script>
-<script src="enhancements.js?v=0.8.0"></script>
-<script src="crewlink-changes.js?v=0.8.0"></script>
-<script src="crewlink-sync.js?v=0.8.0"></script>
+<script src="storage.js?v=0.8.1"></script>
+<script src="roster-parser.js?v=0.8.1"></script>
+<script src="roster-history.js?v=0.8.1"></script>
+<script src="ftl-engine.js?v=0.8.1"></script>
+<script src="app.js?v=0.8.1"></script>
+<script src="enhancements.js?v=0.8.1"></script>
+<script src="crewlink-changes.js?v=0.8.1"></script>
+<script src="crewlink-sync.js?v=0.8.1"></script>
 </body>
 </html>

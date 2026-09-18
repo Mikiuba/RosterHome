@@ -458,3 +458,115 @@ body::before{content:"";position:fixed;z-index:9998;top:0;left:0;right:0;height:
   .together-detail-row{grid-template-columns:82px minmax(0,1fr) 14px;gap:9px;padding:12px 2px}.together-detail-copy b{font-size:12px}.together-detail-copy small{font-size:10.5px}
   .together-workload-grid{grid-template-columns:repeat(2,1fr)}
 }
+
+
+/* =========================================================
+   RosterHome v0.8.1 · mobile alignment + compact calendar
+   ========================================================= */
+*,*::before,*::after{box-sizing:border-box}
+input,select,textarea,button{max-width:100%;min-width:0}
+input[type="date"],input[type="month"],input[type="time"]{
+  width:100%;min-width:0;max-width:100%;
+  -webkit-appearance:none;appearance:none;
+}
+.fieldrow>*,
+.rulegrid>*,
+.cloud-grid>*,
+.card>*{min-width:0}
+.tabs{scroll-padding-inline:13px}
+.tabs::after{content:"";flex:0 0 8px}
+
+.together-month-select-wrap{
+  position:relative;z-index:2;
+  display:flex;align-items:center;gap:8px;
+  padding:6px 9px 6px 11px;
+  border:1px solid rgba(255,255,255,.11);
+  border-radius:999px;
+  background:rgba(7,11,24,.34);
+}
+.together-month-select-wrap>span{
+  color:#8f9bb6;font-size:10px;font-weight:750;text-transform:uppercase;letter-spacing:.06em
+}
+.together-month-select{
+  width:auto;min-width:150px;
+  border:0!important;background:transparent!important;
+  padding:2px 22px 2px 0!important;
+  color:#e3e8f7;font-size:12px;font-weight:800;
+  text-transform:capitalize;
+}
+
+.mobile-day-hero{
+  display:flex;align-items:center;gap:12px;
+  margin:8px 0 12px;padding:14px;border:1px solid var(--line);border-radius:16px;background:#111827
+}
+.mobile-day-hero.together{background:linear-gradient(145deg,#24513f,#1b3d31);border-color:rgba(123,224,179,.26)}
+.mobile-day-hero.partial{background:linear-gradient(145deg,#4a4027,#3a321f);border-color:rgba(255,213,122,.25)}
+.mobile-day-hero.busy{background:linear-gradient(145deg,#422a34,#34212a);border-color:rgba(255,139,158,.22)}
+.mobile-day-hero-icon{font-size:27px}
+.mobile-day-hero div{display:flex;flex-direction:column;gap:3px}
+.mobile-day-hero b{font-size:16px}.mobile-day-hero small{color:#c3cbe0;font-size:11px}
+.mobile-day-note{margin:0 0 12px;padding:9px 11px;border:1px solid rgba(255,205,105,.24);border-radius:11px;background:rgba(255,205,105,.08);color:#ffd57a;font-size:11px}
+.mobile-day-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:13px}
+.mobile-day-grid>div{display:flex;flex-direction:column;gap:3px;padding:10px;border:1px solid var(--line);border-radius:12px;background:#0e1528}
+.mobile-day-grid span{color:var(--muted);font-size:9.5px}.mobile-day-grid b{font-size:12px}
+.mobile-day-open-full{width:100%}
+
+@media(max-width:560px){
+  /* formularios Safari/iPhone */
+  .card,.grid,.fieldrow,.rulegrid{min-width:0}
+  input,select,textarea{width:100%!important;min-width:0!important;max-width:100%!important}
+  input[type="date"]{display:block}
+  .fieldrow{overflow:visible}
+
+  /* calendario mensual: vistazo, no Tetris */
+  #calendarView>.card{padding:10px}
+  .calendar.month-view{gap:1px;background:var(--calendar-grid);border:1px solid var(--calendar-grid);border-radius:14px;overflow:hidden}
+  .calendar.month-view .dow{
+    position:sticky;top:0;z-index:2;
+    margin:0;padding:8px 0;
+    background:#0e1422;font-size:9px;font-weight:750;
+  }
+  .calendar.month-view .day{
+    position:relative;
+    min-height:92px;
+    padding:5px 4px 4px;
+    border:0;border-radius:0;
+    background:#101624;
+    overflow:hidden;
+  }
+  .calendar.month-view .day.other{background:#1c2435;opacity:.58}
+  .calendar.month-view .day.today{box-shadow:inset 0 0 0 1px var(--accent)}
+  .calendar.month-view .daynum{margin:0 0 4px;font-size:10px}
+  .calendar.month-view .daynum-btn{padding:0;background:transparent;border:0}
+
+  .month-view .simple-day-status{
+    position:relative;
+    justify-content:flex-start;
+    min-height:62px;
+    margin:0;padding:6px 4px;
+    border-radius:7px;
+    text-align:center;
+  }
+  .month-view .simple-status-main{
+    display:flex;flex-direction:column;align-items:center;gap:2px;
+    width:100%;font-size:8px;line-height:1.05;
+  }
+  .month-view .simple-status-emoji{font-size:12px;line-height:1}
+  .month-view .simple-status-label{display:block;max-width:100%}
+  .month-view .simple-status-full{display:none}
+  .month-view .simple-status-short{display:block;font-size:7.5px;font-weight:800;white-space:nowrap}
+  .month-view .simple-status-time{font-size:6.6px;line-height:1.1;white-space:nowrap}
+  .simple-status-recovery{
+    position:absolute;right:3px;bottom:3px;
+    width:14px;height:14px;display:grid;place-items:center;
+    border-radius:50%;
+    background:rgba(255,205,105,.17);
+    border:1px solid rgba(255,205,105,.28);
+    color:#ffd57a;font-size:8px;font-weight:900;
+  }
+  .simple-status-overlay{display:none!important}
+
+  .footer{display:none}
+  .together-month-select-wrap{align-self:flex-start}
+  .together-month-select{min-width:158px}
+}

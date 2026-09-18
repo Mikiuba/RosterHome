@@ -1,4 +1,4 @@
-# RosterHome v0.8.0 — iPhone Direct + Windows Bridge
+# RosterHome v0.8.1 — iPhone Direct + Windows Bridge
 
 Esta versión permite actualizar CrewLink directamente desde iPhone/Safari sin depender del PC.
 
@@ -63,3 +63,13 @@ Pulido iPhone:
 - cabecera separada de la hora/Dynamic Island;
 - pestañas móviles más limpias;
 - theme/background PWA coherentes.
+
+## v0.8.1 — Mobile polish
+
+- selector de mes directamente en `Juntos`;
+- corrección de desbordes de inputs/date/select en iPhone;
+- calendario mensual móvil compacto: `Juntos / Un rato / Ocupado`;
+- recovery como insignia discreta `↻`;
+- toque en un día abre un bottom sheet con resumen y acceso al día completo;
+- footer oculto en móvil;
+- pestañas y anchos alineados de forma consistente.
