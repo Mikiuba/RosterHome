@@ -9,13 +9,16 @@
   <meta name="apple-mobile-web-app-title" content="RosterHome" />
   <title>RosterHome</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=0.8.2" />
+  <link rel="stylesheet" href="styles.css?v=0.9.0" />
 </head>
 <body>
 <div class="app">
   <header class="topbar">
     <div class="brand"><div class="logo">✈️</div><div><h1>RosterHome</h1><div class="subtitle">Rosters, sueño y tiempo juntos</div></div></div>
-    <div class="privacy">🔒 Rosters guardados solo en este dispositivo</div>
+    <div class="header-badges">
+      <div class="privacy">🔒 Rosters guardados solo en este dispositivo</div>
+      <div id="offlineBadge" class="offline-badge" hidden>📴 Sin conexión · datos guardados</div>
+    </div>
   </header>
 
   <nav class="tabs">
@@ -324,7 +327,7 @@
     </div>
   </section>
 
-  <div class="footer">RosterHome v0.8.2 · Together · Motor FTL OM-A core activo.</div>
+  <div class="footer">RosterHome v0.9.0 · Together · Motor FTL OM-A core activo.</div>
 </div>
 
 <div id="eventModal" class="modal hidden" aria-hidden="true">
@@ -375,13 +378,13 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="storage.js?v=0.8.2"></script>
-<script src="roster-parser.js?v=0.8.2"></script>
-<script src="roster-history.js?v=0.8.2"></script>
-<script src="ftl-engine.js?v=0.8.2"></script>
-<script src="app.js?v=0.8.2"></script>
-<script src="enhancements.js?v=0.8.2"></script>
-<script src="crewlink-changes.js?v=0.8.2"></script>
-<script src="crewlink-sync.js?v=0.8.2"></script>
+<script src="storage.js?v=0.9.0"></script>
+<script src="roster-parser.js?v=0.9.0"></script>
+<script src="roster-history.js?v=0.9.0"></script>
+<script src="ftl-engine.js?v=0.9.0"></script>
+<script src="app.js?v=0.9.0"></script>
+<script src="enhancements.js?v=0.9.0"></script>
+<script src="crewlink-changes.js?v=0.9.0"></script>
+<script src="crewlink-sync.js?v=0.9.0"></script>
 </body>
 </html>

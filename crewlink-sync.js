@@ -1,4 +1,4 @@
-/* RosterHome v0.8.2 — Hybrid CrewLink import.
+/* RosterHome v0.9.0 — Hybrid CrewLink import.
  * Desktop Chrome: uses the local RosterHome Bridge when present.
  * iPhone/Safari or any browser without the extension: uses a temporary Cloudflare Browser Run session.
  */
@@ -43,6 +43,13 @@
 
   function mode(){return bridgeVersion?'bridge':(cloudInfo?.cloudBrowser?'cloud':null);}
   function updateAvailability(){
+    if(!navigator.onLine){
+      $('clAvailable').textContent='Sin conexión · los rosters guardados siguen disponibles.';
+      $('clInstall').hidden=false;
+      $('clInstall').textContent='Para actualizar desde CrewLink necesitas conexión a internet. Puedes seguir consultando todo lo ya importado.';
+      $('clForm').hidden=true;
+      return;
+    }
     const m=mode();
     if(m==='bridge'){
       $('clAvailable').textContent=`Bridge local detectado · v${bridgeVersion}. CrewLink se ejecutará en este ordenador.`;
@@ -57,6 +64,7 @@
     $('clAvailable').textContent='No hay un método de importación directa disponible.';$('clInstall').hidden=false;$('clForm').hidden=true;
   }
   function lock(v){busy=v;$('clProbe').disabled=v;$('clSubmit').disabled=v;}
+  window.addEventListener('online',updateAvailability);window.addEventListener('offline',updateAvailability);
   function setProgress(value,message,state='running'){
     const box=$('clProgress'),pct=Math.max(0,Math.min(100,Math.round(value||0)));
     box.hidden=false;box.dataset.state=state;$('clProgressLabel').textContent=message;$('clProgressPct').textContent=`${pct}%`;$('clProgressBar').style.width=`${pct}%`;

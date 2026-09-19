@@ -1,4 +1,4 @@
-# RosterHome v0.8.2 — iPhone Direct + Windows Bridge
+# RosterHome v0.9.0 — iPhone Direct + Windows Bridge
 
 Esta versión permite actualizar CrewLink directamente desde iPhone/Safari sin depender del PC.
 
@@ -83,3 +83,28 @@ Pulido iPhone:
 - las horas y el detalle siguen disponibles al tocar el día;
 - `Reglas → Zona horaria de casa` pasa a ser un selector con Atenas, Madrid, Canarias,
   Lisboa, Berlín/Hannover, Malta, Londres, París, Roma, Estambul, Dubái, India y UTC.
+
+
+## v0.9.0 — Offline
+
+RosterHome puede abrirse y consultarse sin conexión después de haber cargado esta
+versión al menos una vez con internet. El Service Worker precarga la interfaz
+principal y los módulos locales, mientras que los rosters, reglas y preferencias
+siguen persistiendo en IndexedDB.
+
+Disponible offline:
+- calendario y detalles ya importados;
+- Juntos y estadísticas;
+- FTL de los rosters guardados;
+- reglas, sueño y recovery;
+- selección de meses ya presentes en los datos.
+
+Requiere internet:
+- importar/actualizar desde CrewLink;
+- cualquier recurso o acción que dependa de Cloudflare.
+
+La UI muestra `📴 Sin conexión · datos guardados` y cambia automáticamente al
+recuperar internet.
+
+También corrige el spacing del selector de mes en FTL en iPhone vertical para
+que su borde inferior no se superponga con la tarjeta FTL.

@@ -495,7 +495,7 @@
   }
 
   /* =========================================================
-     RosterHome v0.8.2 · Together
+     RosterHome v0.9.0 · Together
      ========================================================= */
   function rhBothRostersReady(){
     return state.people.every(p=>(p.duties||[]).length>0);
@@ -725,7 +725,7 @@
 
 
   /* =========================================================
-     v0.8.2 · Mobile calendar polish
+     v0.9.0 · Mobile calendar polish
      ========================================================= */
   function rhAvailableMonths(){
     const set=new Set([state.month]);
@@ -809,5 +809,46 @@
     baseTogetherRenderSummary();
     rhPopulateTogetherMonthSelect();
   };
+
+
+  /* =========================================================
+     v0.9.0 · Offline/PWA status
+     ========================================================= */
+  let rhWasOffline=!navigator.onLine;
+  function rhUpdateConnectivity(){
+    const badge=$('offlineBadge');
+    if(!badge)return;
+    if(!navigator.onLine){
+      badge.hidden=false;
+      badge.classList.remove('reconnected');
+      badge.textContent='📴 Sin conexión · datos guardados';
+      badge.title='Puedes consultar calendario, Juntos, FTL, reglas y rosters guardados. Para importar desde CrewLink necesitas internet.';
+      rhWasOffline=true;
+      document.documentElement.dataset.connectivity='offline';
+    }else{
+      document.documentElement.dataset.connectivity='online';
+      if(rhWasOffline){
+        badge.hidden=false;
+        badge.classList.add('reconnected');
+        badge.textContent='✓ Conexión recuperada';
+        clearTimeout(window.__rhReconnectTimer);
+        window.__rhReconnectTimer=setTimeout(()=>{badge.hidden=true;badge.classList.remove('reconnected');},2600);
+      }else{
+        badge.hidden=true;
+      }
+      rhWasOffline=false;
+    }
+  }
+  window.addEventListener('online',rhUpdateConnectivity);
+  window.addEventListener('offline',rhUpdateConnectivity);
+  rhUpdateConnectivity();
+
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.ready.then(async registration=>{
+      try{
+        if(registration.active) document.documentElement.dataset.offlineReady='true';
+      }catch(_){}
+    }).catch(()=>{});
+  }
 
 })();

@@ -1,10 +1,40 @@
-const CACHE='rosterhome-v0.8.2';
-const FALLBACKS=['./index.html','./styles.css','./roster-parser.js','./roster-history.js','./ftl-engine.js','./app.js','./enhancements.js','./storage.js','./manifest.webmanifest'];
+const CACHE='rosterhome-v0.9.0';
+const CORE=[
+  './',
+  './index.html',
+  './styles.css',
+  './manifest.webmanifest',
+  './storage.js',
+  './roster-parser.js',
+  './roster-history.js',
+  './ftl-engine.js',
+  './app.js',
+  './enhancements.js',
+  './crewlink-changes.js',
+  './crewlink-sync.js'
+];
+
+async function cacheCore(){
+  const cache=await caches.open(CACHE);
+  for(const url of CORE){
+    try{
+      const response=await fetch(url,{cache:'reload'});
+      if(response && response.ok) await cache.put(url,response.clone());
+    }catch(err){
+      // A missing optional asset must not block SW installation.
+      console.warn('[RosterHome SW] No se pudo precachear',url,err);
+    }
+  }
+  // index.html is the one critical offline asset.
+  const index=await cache.match('./index.html',{ignoreSearch:true});
+  if(!index) throw new Error('No se pudo preparar RosterHome para uso offline.');
+}
 
 self.addEventListener('install',event=>{
-  // Do not use cache.addAll(): one transient 404 during GitHub Pages deployment
-  // must never prevent a new service worker from installing.
-  self.skipWaiting();
+  event.waitUntil((async()=>{
+    await cacheCore();
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate',event=>{
@@ -15,25 +45,73 @@ self.addEventListener('activate',event=>{
   })());
 });
 
+function isStaticAsset(request,url){
+  return request.destination==='script' ||
+    request.destination==='style' ||
+    request.destination==='manifest' ||
+    /\.(?:js|css|webmanifest|png|jpg|jpeg|svg|ico)$/i.test(url.pathname);
+}
+
 self.addEventListener('fetch',event=>{
-  if(event.request.method!=='GET') return;
-  const url=new URL(event.request.url);
-  if(url.pathname.startsWith('/api/')) return;
-  if(url.origin!==self.location.origin) return;
-  event.respondWith((async()=>{
-    const cache=await caches.open(CACHE);
-    try{
-      const fresh=await fetch(event.request,{cache:'no-store'});
-      if(fresh && fresh.ok) cache.put(event.request,fresh.clone()).catch(()=>{});
-      return fresh;
-    }catch(err){
-      const cached=await cache.match(event.request,{ignoreSearch:true});
-      if(cached) return cached;
-      if(event.request.mode==='navigate'){
-        const index=await cache.match('./index.html',{ignoreSearch:true});
-        if(index) return index;
+  const request=event.request;
+  if(request.method!=='GET') return;
+
+  const url=new URL(request.url);
+
+  // API/CrewLink always requires internet; never fake a cached API response.
+  if(url.origin===self.location.origin && url.pathname.startsWith('/api/')) return;
+
+  // Same-origin navigation: network first so updates arrive promptly, offline shell as fallback.
+  if(url.origin===self.location.origin && request.mode==='navigate'){
+    event.respondWith((async()=>{
+      const cache=await caches.open(CACHE);
+      try{
+        const fresh=await fetch(request,{cache:'no-store'});
+        if(fresh && fresh.ok) await cache.put('./index.html',fresh.clone());
+        return fresh;
+      }catch(_){
+        return (await cache.match('./index.html',{ignoreSearch:true})) ||
+               (await cache.match('./',{ignoreSearch:true})) ||
+               new Response('RosterHome no está disponible offline todavía.',{status:503,headers:{'Content-Type':'text/plain; charset=utf-8'}});
       }
-      throw err;
-    }
-  })());
+    })());
+    return;
+  }
+
+  // Same-origin static assets: cache first -> instant offline startup, revalidate in background.
+  if(url.origin===self.location.origin && isStaticAsset(request,url)){
+    event.respondWith((async()=>{
+      const cache=await caches.open(CACHE);
+      const cached=await cache.match(request,{ignoreSearch:true});
+      const refresh=fetch(request,{cache:'no-store'}).then(async response=>{
+        if(response && response.ok) await cache.put(request,response.clone());
+        return response;
+      }).catch(()=>null);
+
+      if(cached){
+        event.waitUntil(refresh);
+        return cached;
+      }
+      const fresh=await refresh;
+      if(fresh) return fresh;
+      throw new Error('Recurso no disponible offline');
+    })());
+    return;
+  }
+
+  // Other same-origin GETs: network first, then cache.
+  if(url.origin===self.location.origin){
+    event.respondWith((async()=>{
+      const cache=await caches.open(CACHE);
+      try{
+        const fresh=await fetch(request,{cache:'no-store'});
+        if(fresh && fresh.ok) await cache.put(request,fresh.clone());
+        return fresh;
+      }catch(err){
+        const cached=await cache.match(request,{ignoreSearch:true});
+        if(cached)return cached;
+        throw err;
+      }
+    })());
+  }
 });
