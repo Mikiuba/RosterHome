@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "rosterhome-crewlink",
+  "name": "rosterhome",
   "main": "cloudflare/worker.mjs",
   "compatibility_date": "2026-09-15",
   "workers_dev": true,
@@ -25,12 +25,10 @@
       }
     ]
   },
-  "migrations": [
-    {
-      "tag": "calendar-v1",
-      "new_sqlite_classes": [
-        "CalendarStore"
-      ]
+  "exports": {
+    "CalendarStore": {
+      "type": "durable-object",
+      "storage": "sqlite"
     }
-  ]
+  }
 }

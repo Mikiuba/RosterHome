@@ -1,0 +1,134 @@
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('summarySheet')?.classList.contains('hidden'))rhCloseSummarySheet();});
+
+
+  /* =========================================================
+     v0.9.4 · Mobile calendar polish
+     ========================================================= */
+  function rhAvailableMonths(){
+    const set=new Set([state.month]);
+    state.people.forEach(p=>{
+      (p.duties||[]).forEach(d=>{
+        const key=String(d.date||d.sourceCheckInDate||'');
+        if(/^\d{4}-\d{2}/.test(key))set.add(key.slice(0,7));
+      });
+      (p.coverage||[]).forEach(c=>{
+        if(/^\d{4}-\d{2}/.test(String(c.start||'')))set.add(String(c.start).slice(0,7));
+        if(/^\d{4}-\d{2}/.test(String(c.end||'')))set.add(String(c.end).slice(0,7));
+      });
+    });
+    return [...set].sort();
+  }
+  function rhPopulateTogetherMonthSelect(){
+    const sel=$('togetherMonthSelect'); if(!sel)return;
+    const months=rhAvailableMonths();
+    sel.innerHTML=months.map(m=>`<option value="${m}" ${m===state.month?'selected':''}>${esc(monthLabel(m))}</option>`).join('');
+  }
+  $('togetherMonthSelect')?.addEventListener('change',()=>{
+    const val=$('togetherMonthSelect').value;
+    if(!/^\d{4}-\d{2}$/.test(val))return;
+    state.month=val;
+    state.focusDate=`${val}-01`;
+    saveState();
+    try{queueCalendarRender();}catch(_){}
+    renderSummary();
+  });
+
+  function rhOpenMobileDaySheet(key){
+    if(!matchMedia('(max-width:560px)').matches || state.calendarMode!=='month' || state.calendarDensity!=='simple'){
+      openDay(key); return;
+    }
+    const derived=allDerived(),s=dayPlanStatus(key,derived),sheet=$('mobileDaySheet');
+    if(!sheet)return;
+    const dinner=mealWindowForDay(key,state.rules.dinnerTime,derived);
+    const sleep=rhSleepTogether?rhSleepTogether(key,derived):null;
+    const rec=s.recoveryOverlays?.length?recoveryOverlayLabel(s.best,derived):'';
+    $('mobileDayTitle').textContent=localDayLabel(key,{weekday:'long',day:'numeric',month:'long'});
+    $('mobileDaySubtitle').textContent=s.detail||'';
+    $('mobileDayBody').innerHTML=`
+      <div class="mobile-day-hero ${s.level}">
+        <span class="mobile-day-hero-icon">${s.emoji}</span>
+        <div><b>${esc(s.label)}</b>${s.best?`<small>${esc(timeLocal(s.best.start))}–${esc(timeLocal(s.best.end))}</small>`:''}</div>
+      </div>
+      ${rec?`<div class="mobile-day-note">↻ ${esc(rec)}</div>`:''}
+      <div class="mobile-day-grid">
+        <div><span>Tiempo potencial</span><b>${s.totalHours?`${s.totalHours.toFixed(1)} h`:'—'}</b></div>
+        <div><span>Cena juntos</span><b>${dinner?'Sí':'No'}</b></div>
+        <div><span>Dormir juntos</span><b>${sleep?'Sí':'No'}</b></div>
+      </div>
+      <button class="btn primary mobile-day-open-full" type="button" data-open-full-day="${key}">Ver día completo</button>
+    `;
+    sheet.classList.remove('hidden');sheet.setAttribute('aria-hidden','false');document.body.classList.add('modal-open');
+  }
+  function rhCloseMobileDaySheet(){
+    const sheet=$('mobileDaySheet');if(!sheet)return;
+    sheet.classList.add('hidden');sheet.setAttribute('aria-hidden','true');
+    if($('eventModal')?.classList.contains('hidden')&&$('summarySheet')?.classList.contains('hidden'))document.body.classList.remove('modal-open');
+  }
+  $('calendar')?.addEventListener('click',e=>{
+    const day=e.target.closest('[data-mobile-day],[data-open-day]');
+    if(!day)return;
+    if(matchMedia('(max-width:560px)').matches && state.calendarMode==='month' && state.calendarDensity==='simple'){
+      e.preventDefault();e.stopImmediatePropagation();
+      rhOpenMobileDaySheet(day.dataset.mobileDay||day.dataset.openDay);
+    }
+  },true);
+  $('mobileDaySheet')?.addEventListener('click',e=>{
+    if(e.target.closest('[data-close-mobile-day]')){rhCloseMobileDaySheet();return;}
+    const full=e.target.closest('[data-open-full-day]');
+    if(full){
+      rhCloseMobileDaySheet();
+      openDay(full.dataset.openFullDay);
+    }
+  });
+
+  const baseTogetherRenderSummary=renderSummary;
+  renderSummary=function(){
+    baseTogetherRenderSummary();
+    rhPopulateTogetherMonthSelect();
+  };
+
+
+  /* =========================================================
+     v0.9.4 · Offline/PWA status
+     ========================================================= */
+  let rhWasOffline=!navigator.onLine;
+  function rhUpdateConnectivity(){
+    const badge=$('offlineBadge');
+    if(!badge)return;
+    if(!navigator.onLine){
+      badge.hidden=false;
+      badge.classList.remove('reconnected');
+      badge.textContent='📴 Sin conexión · datos guardados';
+      badge.title='Puedes consultar calendario, Juntos, FTL, reglas y rosters guardados. Para importar desde CrewLink necesitas internet.';
+      rhWasOffline=true;
+      document.documentElement.dataset.connectivity='offline';
+    }else{
+      document.documentElement.dataset.connectivity='online';
+      if(rhWasOffline){
+        badge.hidden=false;
+        badge.classList.add('reconnected');
+        badge.textContent='✓ Conexión recuperada';
+        clearTimeout(window.__rhReconnectTimer);
+        window.__rhReconnectTimer=setTimeout(()=>{badge.hidden=true;badge.classList.remove('reconnected');},2600);
+      }else{
+        badge.hidden=true;
+      }
+      rhWasOffline=false;
+    }
+  }
+  window.addEventListener('online',rhUpdateConnectivity);
+  window.addEventListener('offline',rhUpdateConnectivity);
+  rhUpdateConnectivity();
+
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.ready.then(async registration=>{
+      try{
+        if(registration.active) document.documentElement.dataset.offlineReady='true';
+      }catch(_){}
+    }).catch(()=>{});
+  }
+
+
+
+
+})();

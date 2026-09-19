@@ -1,0 +1,71 @@
+    derived.filter(e=>e.kind==='sleep'&&e.sleepConflict&&dayKey(e.start).startsWith(state.month)).forEach(e=>issues.push({date:dayKey(e.start),txt:`${state.people[e.person].name}: conflicto entre sueño y duty`}));
+    model.dayRows.filter(x=>x.status.level==='busy').forEach(x=>issues.push({date:x.key,txt:'Día ocupado: poca o ninguna coincidencia continua'}));
+    issues.sort((a,b)=>a.date.localeCompare(b.date));
+    $('coordination').innerHTML=issues.slice(0,12).map(i=>`<button type="button" class="summary-row summary-row-button" data-summary-day="${i.date}"><span>${i.date.slice(8,10)}/${i.date.slice(5,7)}</span><b>${esc(i.txt)}</b></button>`).join('')||'<div class="muted">No hay conflictos destacados en este mes.</div>';
+    renderWorkloadComparison(derived);
+  };
+
+  function saveEnhancedRules(){
+    ['homeTz','lunchTime','dinnerTime','dateNightLatestStart','dateNightUntil'].forEach(k=>{if($(k))state.rules[k]=$(k).value.trim();});
+    ['sleepHours','quietLead','commuteOut','commuteHome','briefingLead0','briefingLead1','prepMinutes0','prepMinutes1','longDuty','veryLongDuty','partialRecovery','fullRecovery','mealFlex'].forEach(k=>state.rules[k]=Number($(k).value));
+    saveState();renderCalendar();
+  }
+  function exportEnhancedIcs(){
+    const derived=allDerived().filter(e=>['sleep','recovery','quiet','briefing'].includes(e.kind)),[y,m]=state.month.split('-').map(Number),days=new Date(y,m,0).getDate(),couple=[];
+    for(let d=1;d<=days;d++){const key=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`,w=coupleWindowForDay(key,allDerived());if(w)couple.push({kind:'couple',person:null,start:w.start,end:w.end,label:'❤️ Ventana juntos'});}
+    const events=[...derived,...couple];let ics='BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//RosterHome//ES\r\nCALSCALE:GREGORIAN\r\n';
+    events.forEach((e,i)=>{const p=e.person==null?'':` · ${state.people[e.person].name}`;ics+=`BEGIN:VEVENT\r\nUID:${Date.now()}-${i}@rosterhome\r\nDTSTAMP:${icsStamp(new Date())}\r\nDTSTART:${icsStamp(e.start)}\r\nDTEND:${icsStamp(e.end)}\r\nSUMMARY:${icsEscape(e.label+p)}\r\nEND:VEVENT\r\n`;});ics+='END:VCALENDAR\r\n';
+    const blob=new Blob([ics],{type:'text/calendar;charset=utf-8'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`RosterHome-${state.month}.ics`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  }
+
+  // Capture phase prevents the older handlers from saving/exporting without the new fields.
+  $('saveRules')?.addEventListener('click',e=>{
+    e.stopImmediatePropagation();
+    try{new Intl.DateTimeFormat('es',{timeZone:$('homeTz').value}).format();saveEnhancedRules();alert('Reglas guardadas.');}
+    catch(err){alert('Zona horaria no válida. Usa, por ejemplo, Europe/Athens o Europe/Madrid.');}
+  },true);
+  $('exportIcs')?.addEventListener('click',e=>{e.stopImmediatePropagation();exportEnhancedIcs();},true);
+  $('stats')?.addEventListener('click',e=>{const b=e.target.closest('[data-summary-metric]');if(!b)return;selectedSummaryMetric=b.dataset.summaryMetric;renderSummaryDetail(summaryModel());});
+  ['summaryDrilldown','bestWindows','coordination'].forEach(id=>$(id)?.addEventListener('click',e=>{const b=e.target.closest('[data-summary-day]');if(!b)return;openDay(b.dataset.summaryDay);document.querySelector('.tab[data-view="calendarView"]')?.click();}));
+
+  function syncPersonalRuleNames(){
+    if($('rulesName0')) $('rulesName0').textContent=`👨‍✈️ ${state.people[0].name||'Perfil 1'}`;
+    if($('rulesName1')) $('rulesName1').textContent=`👩‍✈️ ${state.people[1].name||'Perfil 2'}`;
+  }
+  ['name0','name1'].forEach(id=>$(id)?.addEventListener('change',syncPersonalRuleNames));
+
+  // Fill the new inputs after state migration and repaint using the enhanced logic.
+  syncInputs();
+  syncPersonalRuleNames();
+  renderCalendar();
+
+  // v0.3.2 — durable roster persistence and user-controlled backups.
+  function storageDateLabel(value){
+    if(!value)return 'Todavía no';
+    try{return new Intl.DateTimeFormat('es-ES',{dateStyle:'short',timeStyle:'short'}).format(new Date(value));}
+    catch(_){return value;}
+  }
+  async function refreshStorageStatus(){
+    if(!$('storageBadge'))return;
+    let st={indexedDB:false,persisted:false};
+    try{st=await window.RosterStorage?.status()||st;}catch(_){ }
+    const hasRoster=state.people.some(p=>(p.duties||[]).length>0);
+    $('storageSaved').textContent=hasRoster?'Sí · IndexedDB + copia local':'Sin roster importado';
+    $('storagePersisted').textContent=st.persisted?'Concedida ✅':(st.indexedDB?'IndexedDB activa · no garantizada':'No disponible');
+    $('storageLastSaved').textContent=storageDateLabel(state.lastSavedAt);
+    $('storageBadge').className=`storage-badge ${st.persisted?'ok':(st.indexedDB?'warn':'bad')}`;
+    $('storageBadge').textContent=st.persisted?'Persistente':(st.indexedDB?'Guardado local':'Solo memoria local');
+    if($('storageHelp')) $('storageHelp').textContent=st.persisted
+      ?'iOS/Safari ha concedido almacenamiento persistente a RosterHome. Aun así, exporta una copia antes de borrar datos web o cambiar de dispositivo.'
+      :'RosterHome usa IndexedDB, pero Safari no garantiza todavía que nunca pueda purgar estos datos. La copia de seguridad JSON evita tener que reimportar los rosters.';
+  }
+  $('backupData')?.addEventListener('click',async()=>{
+    try{saveState({immediate:true});await window.RosterStorage?.flush();window.RosterStorage?.downloadBackup(state);}
+    catch(err){alert('No se pudo crear la copia: '+(err?.message||err));}
+  });
+  $('restoreData')?.addEventListener('click',()=>{$('restoreDataFile')?.click();});
+  $('restoreDataFile')?.addEventListener('change',async e=>{
+    const file=e.target.files?.[0]; if(!file)return;
+    try{
+      const restored=await window.RosterStorage.readBackupFile(file);
+      const names=(restored.people||[]).slice(0,2).map(p=>p.name||'Perfil').join(' + ');

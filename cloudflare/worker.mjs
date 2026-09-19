@@ -1,4 +1,4 @@
-const VERSION='0.9.4';
+const VERSION='1.0.1';
 const START='http://crewlink.corendonairlines.com:8090/crewlink/crewlink.jsp?crewlinkOperation=crewlinkForCrew&resetSession=Y';
 const DUTY='http://crewlink.corendonairlines.com:8090/crewlink/clApp?crewlinkService=individualDutyPlan&crewlinkOperation=default&crewlinkSourcePage=spCrew';
 const ORIGIN='http://crewlink.corendonairlines.com:8090';
@@ -32,6 +32,69 @@ function safeCrewlinkError(error){
   if(/429|browser time limit/i.test(message))return 'Se ha agotado el tiempo diario de navegador de Cloudflare. Prueba más tarde o usa el Bridge del PC.';
   if(/Internal processing error/i.test(message))return 'CrewLink devolvió un error interno al generar el roster.';
   return message.slice(0,500);
+}
+
+
+const CAL_TOKEN_RE=/^[A-Za-z0-9_-]{40,96}$/;
+const MAX_ICS=768*1024;
+
+function calendarText(body,status=200){
+  return new Response(body,{status,headers:{
+    'Content-Type':'text/calendar; charset=utf-8',
+    'Cache-Control':'public, max-age=300, stale-while-revalidate=3600',
+    'Content-Disposition':'inline',
+    'X-Content-Type-Options':'nosniff',
+    'Referrer-Policy':'no-referrer'
+  }});
+}
+function validIcs(value){
+  return typeof value==='string'&&value.length>40&&value.length<=MAX_ICS&&/^BEGIN:VCALENDAR\r?\n/.test(value)&&/\r?\nEND:VCALENDAR\r?\n?$/.test(value);
+}
+
+class CalendarStore{
+  constructor(state){this.state=state;}
+  async fetch(request){
+    const url=new URL(request.url);
+    if(request.method==='POST'&&url.pathname==='/publish'){
+      let payload;
+      try{payload=await request.json();}catch{return json({error:'JSON inválido.'},400);}
+      if(!validIcs(payload?.briefings)||!validIcs(payload?.flights))return json({error:'Calendario inválido o demasiado grande.'},400);
+      await this.state.storage.put({
+        briefings:payload.briefings,
+        flights:payload.flights,
+        updatedAt:new Date().toISOString()
+      });
+      return json({ok:true,updatedAt:new Date().toISOString()});
+    }
+    if(request.method==='GET'&&/^\/feed\/(briefings|flights)$/.test(url.pathname)){
+      const kind=url.pathname.split('/').pop();
+      const value=await this.state.storage.get(kind);
+      if(!value)return calendarText('BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//RosterHome//Empty//ES\r\nCALSCALE:GREGORIAN\r\nEND:VCALENDAR\r\n',200);
+      return calendarText(value);
+    }
+    return json({error:'Ruta no encontrada.'},404);
+  }
+}
+
+async function calendarPublish(request,env){
+  if(request.method!=='POST')return json({error:'Método no permitido.'},405);
+  if(!sameOrigin(request))return json({error:'Origen no permitido.'},403);
+  if(!(await authorized(request,env.ROSTERHOME_ACCESS_KEY)))return json({error:'Clave de acceso a RosterHome incorrecta.'},401);
+  if(!env.CALENDAR_STORE)return json({error:'Almacenamiento de calendarios no configurado.'},503);
+  let payload;
+  try{payload=await request.json();}catch{return json({error:'JSON inválido.'},400);}
+  if(!CAL_TOKEN_RE.test(String(payload?.token||'')))return json({error:'Token de calendario inválido.'},400);
+  if(!validIcs(payload?.briefings)||!validIcs(payload?.flights))return json({error:'Calendario inválido o demasiado grande.'},400);
+  const id=env.CALENDAR_STORE.idFromName(payload.token);
+  const stub=env.CALENDAR_STORE.get(id);
+  return stub.fetch('https://calendar-store/publish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({briefings:payload.briefings,flights:payload.flights})});
+}
+async function calendarFeed(pathname,env){
+  if(!env.CALENDAR_STORE)return calendarText('Calendar storage unavailable',503);
+  const m=pathname.match(/^\/calendar\/([A-Za-z0-9_-]{40,96})\/(briefings|flights)\.ics$/);
+  if(!m)return null;
+  const [,token,kind]=m,id=env.CALENDAR_STORE.idFromName(token);
+  return env.CALENDAR_STORE.get(id).fetch(`https://calendar-store/feed/${kind}`);
 }
 
 class CdpClient{
@@ -72,7 +135,7 @@ async function acquireCdp(env){
   const acquire=await env.BROWSER.fetch(`${host}/v1/devtools/browser?`,{method:'POST'});
   if(!acquire.ok)throw Error(`Cloudflare Browser Run respondió HTTP ${acquire.status}.`);
   const info=await acquire.json();if(!info?.sessionId)throw Error('Cloudflare no devolvió una sesión de navegador.');
-  const upgrade=await env.BROWSER.fetch(`${host}/v1/devtools/browser/${encodeURIComponent(info.sessionId)}`,{headers:{Upgrade:'websocket','cf-brapi-client':'RosterHome/0.9.4'}});
+  const upgrade=await env.BROWSER.fetch(`${host}/v1/devtools/browser/${encodeURIComponent(info.sessionId)}`,{headers:{Upgrade:'websocket','cf-brapi-client':'RosterHome/1.0.1'}});
   if(!upgrade.webSocket)throw Error(`No se pudo abrir el canal de control del navegador remoto (HTTP ${upgrade.status}).`);
   const ws=upgrade.webSocket;ws.accept();const cdp=new CdpClient(ws);
   const {targetId}=await cdp.send('Target.createTarget',{url:'about:blank'});
@@ -125,6 +188,11 @@ function ndjsonStream(env,payload){
 
 export default {async fetch(request,env){
   const u=new URL(request.url);
+  if(u.pathname.startsWith('/calendar/')){
+    const feed=await calendarFeed(u.pathname,env);
+    if(feed)return feed;
+  }
+  if(u.pathname==='/api/calendar/publish')return calendarPublish(request,env);
   if(u.pathname==='/api/crewlink/status'&&request.method==='GET')return json({available:true,mode:'hybrid',configured:typeof env.ROSTERHOME_ACCESS_KEY==='string'&&env.ROSTERHOME_ACCESS_KEY.length>=32,cloudBrowser:!!env.BROWSER,version:VERSION,transport:'cloud-browser+local-bridge',requiresAccessKey:true});
   if(u.pathname==='/api/crewlink/cloud/probe'){
     if(request.method!=='POST')return json({error:'Método no permitido.'},405);if(!sameOrigin(request))return json({error:'Origen no permitido.'},403);if(!(await authorized(request,env.ROSTERHOME_ACCESS_KEY)))return json({error:'Clave de acceso a RosterHome incorrecta.'},401);
@@ -138,3 +206,6 @@ export default {async fetch(request,env){
   }
   if(u.pathname.startsWith('/api/'))return json({error:'Ruta no encontrada.'},404);return env.ASSETS.fetch(request);
 }};
+
+
+export { CalendarStore };

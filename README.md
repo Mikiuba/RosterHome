@@ -1,4 +1,4 @@
-# RosterHome v1.0.0 — iPhone Direct + Windows Bridge
+# RosterHome v1.0.1 — iPhone Direct + Windows Bridge
 
 Esta versión permite actualizar CrewLink directamente desde iPhone/Safari sin depender del PC.
 
@@ -194,3 +194,12 @@ Flujo:
 El endpoint de publicación exige la misma `ROSTERHOME_ACCESS_KEY` privada usada
 por la importación CrewLink. Los endpoints de lectura son accesibles únicamente
 con la URL-token no adivinable.
+
+
+## v1.0.1 — fix deploy de Durable Object
+
+- `wrangler.jsonc` usa el nombre real del Worker de CI: `rosterhome`.
+- `CalendarStore` se exporta explícitamente al final del entrypoint.
+- Se usa la configuración declarativa moderna de Cloudflare:
+  `exports.CalendarStore = { type: "durable-object", storage: "sqlite" }`.
+- Se mantiene el binding `CALENDAR_STORE` para publicar y servir los feeds.

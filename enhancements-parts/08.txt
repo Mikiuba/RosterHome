@@ -1,0 +1,109 @@
+      if(!confirm(`¿Restaurar esta copia de ${names}?\n\nReemplazará los rosters y reglas guardados actualmente en este dispositivo.`)){e.target.value='';return;}
+      state=normalizeState(restored);
+      durableStorageReady=true;
+      saveState({immediate:true});
+      await window.RosterStorage.flush();
+      syncInputs();syncPersonalRuleNames();renderCalendar();
+      if($('summaryView')?.classList.contains('active'))renderSummary();
+      await refreshStorageStatus();
+      alert('Copia restaurada correctamente.');
+    }catch(err){alert(err?.message||'No se pudo restaurar la copia.');}
+    finally{e.target.value='';}
+  });
+  window.addEventListener('rh-storage-ready',refreshStorageStatus);
+  window.addEventListener('rh-storage-saved',refreshStorageStatus);
+  window.addEventListener('rh-storage-restored',()=>{syncPersonalRuleNames();refreshStorageStatus();});
+  window.addEventListener('rh-storage-error',()=>{if($('storageBadge')){$('storageBadge').className='storage-badge bad';$('storageBadge').textContent='Error al guardar';}});
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')window.RosterStorage?.flush();});
+  window.addEventListener('pagehide',()=>window.RosterStorage?.flush());
+  // Never let the persistence layer prevent the rest of RosterHome from starting.
+  if(typeof initializeDurableStorage==='function'){
+    setTimeout(()=>Promise.resolve(initializeDurableStorage()).catch(err=>console.warn('[RosterHome] Persistencia en fallback local',err)).finally(refreshStorageStatus),0);
+  }else{
+    console.warn('[RosterHome] Capa durable no disponible; usando almacenamiento local.');
+    refreshStorageStatus();
+  }
+
+  /* =========================================================
+     RosterHome v0.9.4 · Together
+     ========================================================= */
+  function rhBothRostersReady(){
+    return state.people.every(p=>(p.duties||[]).length>0);
+  }
+  function rhCoverageVerified(person,key){
+    const coverage=person.coverage||[];
+    if(!coverage.length)return true;
+    return coverage.some(c=>c.complete!==false&&String(c.start||'')<=key&&String(c.end||'')>=key);
+  }
+  function rhBothCovered(key){
+    return state.people.every(p=>rhCoverageVerified(p,key));
+  }
+  function rhCoveredPair(key,next=false){
+    return rhBothCovered(key)&&(!next||rhBothCovered(addDaysKey(key,1)));
+  }
+  function rhKeysInRange(start,end){
+    const out=[];let key=dayKey(start),last=dayKey(new Date(+end-1));
+    for(let guard=0;guard<4;guard++){out.push(key);if(key===last)break;key=addDaysKey(key,1);}
+    return out;
+  }
+  function rhHasOperationalStatusRange(start,end){
+    return rhKeysInRange(start,end).some(k=>operationalStatusOnDay(k));
+  }
+  function rhPlanningBlocks(start,end,derived,{includeSleep=false}={}){
+    if(rhHasOperationalStatusRange(start,end))return [{start:new Date(start),end:new Date(end),status:true}];
+    const kinds=new Set(includeSleep?['duty','briefing','sleep']:['duty','briefing']);
+    const commuteOut=minMs(Number(state.rules.commuteOut||0)),commuteHome=minMs(Number(state.rules.commuteHome||0));
+    return derived.filter(e=>kinds.has(e.kind)).map(e=>{
+      let a=new Date(e.start),b=new Date(e.end);
+      if(e.kind==='duty'){a=new Date(+a-commuteOut);b=new Date(+b+commuteHome);}
+      return overlap({start:a,end:b},{start,end},start,end);
+    }).filter(Boolean);
+  }
+  function rhFreeIntervals(start,end,derived,{includeSleep=false,minMinutes=0}={}){
+    if(start>=end)return [];
+    const blocks=mergeIntervals(rhPlanningBlocks(start,end,derived,{includeSleep}));
+    const gaps=[];let cursor=new Date(start);
+    for(const b of blocks){
+      if(b.start>cursor)gaps.push({start:new Date(cursor),end:new Date(b.start)});
+      if(b.end>cursor)cursor=new Date(b.end);
+    }
+    if(cursor<end)gaps.push({start:new Date(cursor),end:new Date(end)});
+    return gaps.filter(g=>(g.end-g.start)>=minMs(minMinutes));
+  }
+  function rhBestGap(start,end,derived,options={}){
+    return rhFreeIntervals(start,end,derived,options).sort((a,b)=>(b.end-b.start)-(a.end-a.start))[0]||null;
+  }
+  function rhRecoveryNote(interval,derived){
+    const recs=recoveryOverlaysForInterval(interval,derived);
+    if(!recs.length)return '';
+    const names=[...new Set(recs.map(r=>state.people[r.person]?.name||`Perfil ${r.person+1}`))];
+    return ` · incluye recovery de ${names.join(' y ')}`;
+  }
+  function rhUniqueItems(items){
+    const seen=new Set();
+    return items.filter(i=>{const k=i.key||i.id||i.text;if(seen.has(k))return false;seen.add(k);return true;});
+  }
+  function rhDayItem(key,text,sub=''){return {key,text,sub};}
+  function rhDateNight(key,derived){
+    if(!rhCoveredPair(key,true))return null;
+    const next=addDaysKey(key,1),windowStart=utcForLocalDayTime(key,'19:00');
+    const latestStart=utcForLocalDayTime(key,state.rules.dateNightLatestStart||'21:00');
+    const end=utcForLocalDayTime(next,state.rules.dateNightUntil||'12:00');
+    const gaps=rhFreeIntervals(windowStart,end,derived,{includeSleep:false,minMinutes:60});
+    const candidate=gaps.find(g=>g.start<=latestStart&&g.end>=end);
+    if(!candidate)return null;
+    return {start:candidate.start<windowStart?windowStart:candidate.start,end};
+  }
+  function rhMorning(key,derived){
+    if(!rhBothCovered(key))return null;
+    return rhBestGap(utcForLocalDayTime(key,'08:00'),utcForLocalDayTime(key,'12:00'),derived,{includeSleep:true,minMinutes:180});
+  }
+  function rhSleepTogether(key,derived){
+    if(!rhCoveredPair(key,true))return null;
+    const start=utcForLocalDayTime(key,'23:00'),end=utcForLocalDayTime(addDaysKey(key,1),'07:00');
+    const gap=rhFreeIntervals(start,end,derived,{includeSleep:false,minMinutes:480}).find(g=>g.start<=start&&g.end>=end);
+    return gap?{start,end}:null;
+  }
+  function rhFullDay(key,derived){
+    if(!rhBothCovered(key))return null;
+    const start=utcForLocalDayTime(key,'09:00'),end=utcForLocalDayTime(key,'21:00');
