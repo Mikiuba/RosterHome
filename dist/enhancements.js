@@ -495,7 +495,7 @@
   }
 
   /* =========================================================
-     RosterHome v0.8.1 · Together
+     RosterHome v0.8.2 · Together
      ========================================================= */
   function rhBothRostersReady(){
     return state.people.every(p=>(p.duties||[]).length>0);
@@ -725,7 +725,7 @@
 
 
   /* =========================================================
-     v0.8.1 · Mobile calendar polish
+     v0.8.2 · Mobile calendar polish
      ========================================================= */
   function rhAvailableMonths(){
     const set=new Set([state.month]);

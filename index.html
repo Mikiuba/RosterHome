@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="RosterHome" />
   <title>RosterHome</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=0.8.1" />
+  <link rel="stylesheet" href="styles.css?v=0.8.2" />
 </head>
 <body>
 <div class="app">
@@ -218,7 +218,23 @@
       <div class="notice">RosterHome detecta automáticamente si cada PDF CrewLink está en UTC o en horas locales por aeropuerto. El calendario de convivencia se muestra en vuestra zona horaria de casa.</div>
       <h3 class="rules-subtitle">Sueño y rutina antes del duty</h3>
       <div class="rulegrid">
-        <div><label>Zona horaria de casa</label><input id="homeTz" value="Europe/Athens"></div>
+        <div><label>Zona horaria de casa</label>
+          <select id="homeTz">
+            <option value="Europe/Athens">Atenas · Grecia</option>
+            <option value="Europe/Madrid">Madrid · España peninsular</option>
+            <option value="Atlantic/Canary">Canarias · España</option>
+            <option value="Europe/Lisbon">Lisboa · Portugal</option>
+            <option value="Europe/Berlin">Berlín / Hannover · Alemania</option>
+            <option value="Europe/Malta">Malta</option>
+            <option value="Europe/London">Londres · Reino Unido</option>
+            <option value="Europe/Paris">París · Francia</option>
+            <option value="Europe/Rome">Roma · Italia</option>
+            <option value="Europe/Istanbul">Estambul · Turquía</option>
+            <option value="Asia/Dubai">Dubái · EAU</option>
+            <option value="Asia/Kolkata">India</option>
+            <option value="UTC">UTC</option>
+          </select>
+        </div>
         <div><label>Horas mínimas de sueño</label><input id="sleepHours" type="number" min="6" max="12" step="0.25" value="8"></div>
         <div><label>Quiet hours antes de dormir (min)</label><input id="quietLead" type="number" min="0" max="120" value="30"></div>
         <div><label>Trayecto casa → report (min)</label><input id="commuteOut" type="number" min="0" max="180" value="0"></div>
@@ -308,7 +324,7 @@
     </div>
   </section>
 
-  <div class="footer">RosterHome v0.8.1 · Together · Motor FTL OM-A core activo.</div>
+  <div class="footer">RosterHome v0.8.2 · Together · Motor FTL OM-A core activo.</div>
 </div>
 
 <div id="eventModal" class="modal hidden" aria-hidden="true">
@@ -359,13 +375,13 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="storage.js?v=0.8.1"></script>
-<script src="roster-parser.js?v=0.8.1"></script>
-<script src="roster-history.js?v=0.8.1"></script>
-<script src="ftl-engine.js?v=0.8.1"></script>
-<script src="app.js?v=0.8.1"></script>
-<script src="enhancements.js?v=0.8.1"></script>
-<script src="crewlink-changes.js?v=0.8.1"></script>
-<script src="crewlink-sync.js?v=0.8.1"></script>
+<script src="storage.js?v=0.8.2"></script>
+<script src="roster-parser.js?v=0.8.2"></script>
+<script src="roster-history.js?v=0.8.2"></script>
+<script src="ftl-engine.js?v=0.8.2"></script>
+<script src="app.js?v=0.8.2"></script>
+<script src="enhancements.js?v=0.8.2"></script>
+<script src="crewlink-changes.js?v=0.8.2"></script>
+<script src="crewlink-sync.js?v=0.8.2"></script>
 </body>
 </html>

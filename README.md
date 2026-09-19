@@ -1,4 +1,4 @@
-# RosterHome v0.8.1 — iPhone Direct + Windows Bridge
+# RosterHome v0.8.2 — iPhone Direct + Windows Bridge
 
 Esta versión permite actualizar CrewLink directamente desde iPhone/Safari sin depender del PC.
 
@@ -73,3 +73,13 @@ Pulido iPhone:
 - toque en un día abre un bottom sheet con resumen y acceso al día completo;
 - footer oculto en móvil;
 - pestañas y anchos alineados de forma consistente.
+
+
+## v0.8.2 — navegación móvil, calendario y huso horario
+
+- las pestañas superiores dejan de comprimirse/solaparse en iPhone y pasan a scroll horizontal real;
+- el calendario mensual simple deja de intentar mostrar horas dentro de celdas estrechas;
+- la celda muestra únicamente emoji + `Juntos`, `Un rato` u `Ocupado` (+ `↻` si hay recovery);
+- las horas y el detalle siguen disponibles al tocar el día;
+- `Reglas → Zona horaria de casa` pasa a ser un selector con Atenas, Madrid, Canarias,
+  Lisboa, Berlín/Hannover, Malta, Londres, París, Roma, Estambul, Dubái, India y UTC.

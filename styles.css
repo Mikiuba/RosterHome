@@ -570,3 +570,94 @@ input[type="date"],input[type="month"],input[type="time"]{
   .together-month-select-wrap{align-self:flex-start}
   .together-month-select{min-width:158px}
 }
+
+
+/* =========================================================
+   RosterHome v0.8.2 · iPhone navigation + calendar legibility
+   ========================================================= */
+
+/* La navegación nunca se comprime: en móvil se desplaza horizontalmente. */
+.tabs{
+  display:flex!important;
+  flex-wrap:nowrap!important;
+  justify-content:flex-start!important;
+  overflow-x:auto!important;
+  overflow-y:hidden!important;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
+  width:100%;
+}
+.tabs::-webkit-scrollbar{display:none}
+.tabs .tab{
+  flex:0 0 auto!important;
+  width:auto!important;
+  min-width:max-content!important;
+  white-space:nowrap!important;
+}
+
+/* Select de huso horario: mismo lenguaje visual que el resto de Reglas. */
+#homeTz{
+  width:100%;
+  max-width:100%;
+  min-width:0;
+  text-overflow:ellipsis;
+}
+
+/* Calendario mensual móvil: la celda solo responde "qué tipo de día es".
+   Las horas viven en el panel al tocar el día, evitando texto cortado. */
+@media(max-width:560px){
+  .tabs{
+    gap:6px!important;
+    margin-left:-13px;
+    margin-right:-13px;
+    width:calc(100% + 26px)!important;
+    padding:0 13px 4px!important;
+  }
+  .tabs .tab{
+    padding:8px 11px!important;
+    font-size:13px!important;
+    line-height:1.15!important;
+    border-radius:13px!important;
+  }
+
+  .calendar.month-view .day{
+    min-height:82px!important;
+    padding:5px 3px 4px!important;
+  }
+  .month-view .simple-day-status{
+    min-height:53px!important;
+    padding:6px 2px!important;
+    overflow:visible!important;
+  }
+  .month-view .simple-status-main{
+    gap:3px!important;
+  }
+  .month-view .simple-status-emoji{
+    font-size:13px!important;
+  }
+  .month-view .simple-status-short{
+    display:block!important;
+    max-width:100%;
+    font-size:7px!important;
+    line-height:1.05!important;
+    white-space:nowrap!important;
+    overflow:visible!important;
+    letter-spacing:-.02em;
+  }
+  .month-view .simple-status-time{
+    display:none!important;
+  }
+  .simple-status-recovery{
+    right:2px!important;
+    bottom:2px!important;
+    width:13px!important;
+    height:13px!important;
+    font-size:7px!important;
+  }
+
+  /* Un poco más de aire para que la primera/última columna no parezcan pegadas. */
+  #calendarView>.card{
+    padding-left:8px!important;
+    padding-right:8px!important;
+  }
+}
