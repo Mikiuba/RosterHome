@@ -71,12 +71,41 @@
 
   function airportTimeZone(iata) { return AIRPORT_TZ[String(iata||'').toUpperCase()] || null; }
 
-  function dateFromDay(period, day) {
-    const base=period?period.start:new Date(); let y=base.getUTCFullYear(), mon=base.getUTCMonth();
-    if (period && (period.end.getUTCFullYear()!==y || period.end.getUTCMonth()!==mon)) {
-      const startDay=period.start.getUTCDate(); if(day<startDay){y=period.end.getUTCFullYear();mon=period.end.getUTCMonth();}
+  const WEEKDAY_INDEX={Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6};
+
+  function dateFromDay(period,day,weekday=null,notBefore=null){
+    if(!period){
+      const now=new Date();
+      return new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),day));
     }
-    return new Date(Date.UTC(y,mon,day));
+
+    const wantedWeekday=weekday
+      ? WEEKDAY_INDEX[String(weekday).slice(0,3)[0].toUpperCase()+String(weekday).slice(1,3).toLowerCase()]
+      : null;
+
+    const start=new Date(Date.UTC(period.start.getUTCFullYear(),period.start.getUTCMonth(),1));
+    const end=new Date(period.end);
+    const floor=notBefore?new Date(Date.UTC(new Date(notBefore).getUTCFullYear(),new Date(notBefore).getUTCMonth(),new Date(notBefore).getUTCDate())):null;
+    const candidates=[];
+
+    for(let cursor=new Date(start);cursor<=end;cursor.setUTCMonth(cursor.getUTCMonth()+1)){
+      const y=cursor.getUTCFullYear(),m=cursor.getUTCMonth();
+      const candidate=new Date(Date.UTC(y,m,day));
+      if(candidate.getUTCMonth()!==m)continue;
+      if(candidate<period.start||candidate>period.end)continue;
+      if(wantedWeekday!=null&&candidate.getUTCDay()!==wantedWeekday)continue;
+      candidates.push(candidate);
+    }
+
+    if(floor){
+      const after=candidates.find(d=>d>=floor);
+      if(after)return after;
+    }
+    if(candidates.length)return candidates[0];
+
+    // Last-resort compatibility for malformed/partial exports.
+    const base=period.start;
+    return new Date(Date.UTC(base.getUTCFullYear(),base.getUTCMonth(),day));
   }
 
   function plusDay(d,n=1){const x=new Date(d);x.setUTCDate(x.getUTCDate()+n);return x;}
@@ -132,7 +161,7 @@
   function operationalDateBefore(text,pos,period){
     const prefix=text.slice(Math.max(0,pos-1800),pos);
     const re=new RegExp('(?:^|\\n)\\s*'+DAY_RE+'(\\d{2})\\s+(?=(?:C\\/I|C\\/O|[A-Z0-9]{2,3}\\s+\\d{1,4}))','gmi');
-    let m,last=null;while((m=re.exec(prefix)))last=m;return last?dateFromDay(period,Number(last[2])):null;
+    let m,last=null;while((m=re.exec(prefix)))last=m;return last?dateFromDay(period,Number(last[2]),last[1]):null;
   }
 
   function collectBlocks(text){
@@ -140,7 +169,7 @@
     while((m=ci.exec(text))){
       const lineStart=text.lastIndexOf('\n',m.index)+1;const before=text.slice(lineStart,m.index);
       const dm=before.match(new RegExp('^\\s*'+DAY_RE+'(\\d{2})\\b','i'));
-      starts.push({index:m.index,lineStart,base:m[1],time:m[2],explicitDay:dm?Number(dm[2]):null});
+      starts.push({index:m.index,lineStart,base:m[1],time:m[2],explicitWeekday:dm?dm[1]:null,explicitDay:dm?Number(dm[2]):null});
     }
     return starts;
   }
@@ -149,14 +178,15 @@
     const block=text.slice(start.lineStart,end);
     const coRe=new RegExp('(?:^|\\n)\\s*(?:'+DAY_RE+'(\\d{2})\\s+)?C\\/O\\s+(!?)(\\d{4})(?:\\+(\\d+))?\\s+([A-Z]{3})','im');
     const co=coRe.exec(block); const flightBlock=co?block.slice(0,co.index):block; const flights=parseFlights(flightBlock);
-    return {...start,block,coDay:co&&co[2]?Number(co[2]):null,coMarked:!!(co&&co[3]==='!'),coTime:co?co[4]:null,coDayOffset:co?Number(co[5]||0):0,coBase:co?co[6]:start.base,
+    return {...start,block,coWeekday:co&&co[1]?co[1]:null,coDay:co&&co[2]?Number(co[2]):null,coMarked:!!(co&&co[3]==='!'),coTime:co?co[4]:null,coDayOffset:co?Number(co[5]||0):0,coBase:co?co[6]:start.base,
       flights,route:routeFromFlights(flights),type:getField(block,'TYPE')||'N/A',ft:getField(block,'FT'),dt:getField(block,'DT'),fdt:getField(block,'FDT'),max:getField(block,'max'),sdt:getField(block,'SDT'),dp:getField(block,'DP'),fdp:getField(block,'FDP'),rt:getField(block,'RT'),brk:getField(block,'BRK'),xfdp:getField(block,'xFDP'),acc:getField(block,'ACC'),ln:getField(block,'LN')};
   }
 
   function zoneFor(timeBasis,airport){return timeBasis==='local_event'?airportTimeZone(airport):'UTC';}
 
   function chooseCheckInDate(text,s,period,previous,timeBasis){
-    let candidate=s.explicitDay?dateFromDay(period,s.explicitDay):null;let source=s.explicitDay?'explicit':null;
+    const previousDate=previous?.date?new Date(previous.date+'T00:00:00Z'):null;
+    let candidate=s.explicitDay?dateFromDay(period,s.explicitDay,s.explicitWeekday,previousDate):null;let source=s.explicitDay?'explicit':null;
     const sourceZone=zoneFor(timeBasis,s.base);
     if(previous&&previous.checkout&&previous.brk&&sourceZone){
       const brkH=parseDuration(previous.brk);
@@ -187,7 +217,7 @@
       const checkIn=wallTimeToInstant(baseDate,s.time,ciZone||'UTC'); let checkout=null,outDate=null;
       const coBase=s.coBase||s.base; const coZone=zoneFor(timeBasis,coBase); if(timeBasis==='local_event'&&!coZone)unknownZones.push(coBase);
       if(s.coTime){
-        outDate=s.coDay?dateFromDay(period,s.coDay):plusDay(baseDate,s.coDayOffset||0);
+        outDate=s.coDay?dateFromDay(period,s.coDay,s.coWeekday,baseDate):plusDay(baseDate,s.coDayOffset||0);
         checkout=wallTimeToInstant(outDate,s.coTime,coZone||'UTC');
         while(checkout<=checkIn){outDate=plusDay(outDate,1);checkout=wallTimeToInstant(outDate,s.coTime,coZone||'UTC');}
       }else if(s.dt){const h=parseDuration(s.dt);if(h!=null){checkout=new Date(checkIn.getTime()+h*3600000);outDate=timeBasis==='local_event'&&coZone?calendarDateAtInstant(checkout,coZone):calendarDateAtInstant(checkout,'UTC');}}
@@ -210,7 +240,7 @@
       let j=i+1;while(j<rows.length&&/^\s*C\/O\b/.test(rows[j][3]))j++;
       const block=text.slice(row.index,j<rows.length?rows[j].index:text.length);
       if(/\bC\/I\b/.test(block)){errors.push(`Jornada mixta ${row[2]}: necesita revisión de la agrupación de servicios.`);continue;}
-      const date=dateFromDay(period,+row[2]);
+      const date=dateFromDay(period,+row[2],row[1]);
       const fields=Object.fromEntries(['ft','dt','sdt','fdp','fdt','max','rt','brk','acc','type','ln','xfdp'].map(k=>[k,getField(block,k)]));
       const standby=/^(STAND-BY|STBY|SBY)\b/.test(head),training=/^Briefing\b/i.test(head);
       const dh=[...block.matchAll(/DH\/([A-Z0-9]+)\s+(\d+[A-Z]?)\s+([A-Z]{3})\s+!?(\d{4})(?:\+(\d+))?\s+!?(\d{4})(?:\+(\d+))?\s+([A-Z]{3})/g)];
@@ -307,7 +337,7 @@
     duties.push(...additional.duties);
     const seenStatus=new Set();
     const dayLineRe=new RegExp('(?:^|\\n)\\s*'+DAY_RE+'(\\d{2})\\s+(ROFF|OFF|RES|SBY|STBY|STAND-BY|STAND\\s+BY|VAC|ABS|SIM|TRG)\\b(?:\\s+([A-Z]{3}))?','gmi');
-    let m;while((m=dayLineRe.exec(text))){const date=isoDay(dateFromDay(period,Number(m[2])));let status=m[3].toUpperCase().replace(/\s+/g,'-');if(status==='STAND-BY'||status==='STBY'||status==='SBY')status='STBY';const k=date+'|'+status;if(seenStatus.has(k))continue;seenStatus.add(k);duties.push({kind:'status',date,status,base:m[4]||null,timeBasis});}
+    let m;while((m=dayLineRe.exec(text))){const date=isoDay(dateFromDay(period,Number(m[2]),m[1]));let status=m[3].toUpperCase().replace(/\s+/g,'-');if(status==='STAND-BY'||status==='STBY'||status==='SBY')status='STBY';const k=date+'|'+status;if(seenStatus.has(k))continue;seenStatus.add(k);duties.push({kind:'status',date,status,base:m[4]||null,timeBasis});}
     duties=duties.filter(d=>!(d.kind==='status'&&['STBY','SIM','TRG'].includes(d.status)&&additional.duties.some(x=>x.date===d.date)));
     duties=dedupe(duties).sort((a,b)=>(a.checkIn||a.date).localeCompare(b.checkIn||b.date));const validation=validateDuties(duties,timeBasis);
     validation.errors.push(...additional.errors);validation.ok=validation.errors.length===0;

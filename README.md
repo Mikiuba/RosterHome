@@ -1,4 +1,4 @@
-# RosterHome v0.9.0 — iPhone Direct + Windows Bridge
+# RosterHome v0.9.1 — iPhone Direct + Windows Bridge
 
 Esta versión permite actualizar CrewLink directamente desde iPhone/Safari sin depender del PC.
 
@@ -108,3 +108,21 @@ recuperar internet.
 
 También corrige el spacing del selector de mes en FTL en iPhone vertical para
 que su borde inferior no se superponga con la tarjeta FTL.
+
+
+## v0.9.1 — importación multi-mes
+
+Corrige un bug del parser al pedir a CrewLink periodos que abarcan tres o más
+meses. El formato del PDF imprime `Mon14`, `Fri14`, etc. sin escribir el nombre
+del mes en cada duty. El parser antiguo resolvía bien uno/dos meses, pero en un
+rango como agosto–octubre podía asignar septiembre u octubre a agosto y después
+detectar un falso solapamiento.
+
+Ahora la fecha se resuelve usando:
+- el día del mes;
+- el día de la semana que imprime CrewLink;
+- el periodo solicitado;
+- la cronología del duty anterior.
+
+La misma lógica se aplica a C/I, C/O, standby/simulador/posicionamiento y estados
+OFF/RES/etc.
