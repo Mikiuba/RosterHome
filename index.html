@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="RosterHome" />
   <title>RosterHome</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=0.9.4" />
+  <link rel="stylesheet" href="styles.css?v=1.0.0" />
 </head>
 <body>
 <div class="app">
@@ -277,28 +277,32 @@
       </div>
       <div class="actions"><button class="btn primary" id="saveRules">Guardar reglas</button></div>
 
-      <div class="calendar-export-card">
+      <div class="calendar-export-card calendar-subscription-card">
         <div class="calendar-export-head">
           <div>
-            <h3>📅 Calendarios de iPhone</h3>
-            <p class="muted">Exporta solo lo operativo. Briefings y vuelos van en archivos separados para que puedas tener dos calendarios independientes y elegir cuál mostrar en tus widgets.</p>
+            <h3>📅 Calendarios automáticos de iPhone</h3>
+            <p class="muted">Instálalos una sola vez. Después RosterHome actualiza Briefings y Vuelos automáticamente cuando cambie tu roster.</p>
           </div>
         </div>
         <div class="calendar-export-grid">
           <div>
-            <label for="calendarExportPerson">Perfil a exportar</label>
+            <label for="calendarExportPerson">Perfil sincronizado</label>
             <select id="calendarExportPerson">
               <option value="0">Perfil 1</option>
               <option value="1">Perfil 2</option>
-              <option value="both">Ambos perfiles</option>
             </select>
           </div>
-          <div class="calendar-export-actions">
-            <button class="btn" id="exportBriefingsIcs" type="button">Exportar Briefings (.ics)</button>
-            <button class="btn" id="exportFlightsIcs" type="button">Exportar Vuelos (.ics)</button>
+          <div>
+            <label for="calendarSyncKey">Clave privada de RosterHome</label>
+            <input id="calendarSyncKey" type="password" autocomplete="off" placeholder="ROSTERHOME_ACCESS_KEY">
           </div>
         </div>
-        <p class="rules-help muted">Los dos archivos llevan nombres de calendario distintos: <b>RosterHome · Briefings</b> y <b>RosterHome · Vuelos</b>. Sueño, recovery y tiempo juntos no se exportan.</p>
+        <div class="calendar-subscription-actions">
+          <button class="btn primary" id="calendarEnableSync" type="button">Activar / actualizar calendarios</button>
+          <button class="btn" id="installBriefingsCalendar" type="button" disabled>Instalar Briefings</button>
+          <button class="btn" id="installFlightsCalendar" type="button" disabled>Instalar Vuelos</button>
+        </div>
+        <p class="rules-help muted">Se crean dos suscripciones privadas e independientes: <b>RosterHome · Briefings</b> y <b>RosterHome · Vuelos</b>. Sueño, recovery y tiempo juntos no se publican.</p>
         <p id="calendarExportStatus" class="calendar-export-status muted" role="status" aria-live="polite"></p>
       </div>
 
@@ -352,7 +356,7 @@
     </div>
   </section>
 
-  <div class="footer">RosterHome v0.9.4 · Together · Motor FTL OM-A core activo.</div>
+  <div class="footer">RosterHome v1.0.0 · Together · Motor FTL OM-A core activo.</div>
 </div>
 
 <div id="eventModal" class="modal hidden" aria-hidden="true">
@@ -403,14 +407,15 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="storage.js?v=0.9.4"></script>
-<script src="roster-parser.js?v=0.9.4"></script>
-<script src="roster-history.js?v=0.9.4"></script>
-<script src="ftl-engine.js?v=0.9.4"></script>
-<script src="app.js?v=0.9.4"></script>
-<script src="enhancements.js?v=0.9.4"></script>
-<script src="calendar-export.js?v=0.9.4"></script>
-<script src="crewlink-changes.js?v=0.9.4"></script>
-<script src="crewlink-sync.js?v=0.9.4"></script>
+<script src="storage.js?v=1.0.0"></script>
+<script src="roster-parser.js?v=1.0.0"></script>
+<script src="roster-history.js?v=1.0.0"></script>
+<script src="ftl-engine.js?v=1.0.0"></script>
+<script src="app.js?v=1.0.0"></script>
+<script src="enhancements.js?v=1.0.0"></script>
+<script src="calendar-export.js?v=1.0.0"></script>
+<script src="calendar-subscriptions.js?v=1.0.0"></script>
+<script src="crewlink-changes.js?v=1.0.0"></script>
+<script src="crewlink-sync.js?v=1.0.0"></script>
 </body>
 </html>

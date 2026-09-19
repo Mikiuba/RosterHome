@@ -1,0 +1,86 @@
+    const gap=rhFreeIntervals(start,end,derived,{includeSleep:true,minMinutes:720}).find(g=>g.start<=start&&g.end>=end);
+    return gap?{start,end}:null;
+  }
+  function rhGetaway(key,derived){
+    if(!rhCoveredPair(key,true))return null;
+    const start=utcForLocalDayTime(key,'15:00'),end=utcForLocalDayTime(addDaysKey(key,1),'12:00');
+    const gap=rhFreeIntervals(start,end,derived,{includeSleep:false,minMinutes:1260}).find(g=>g.start<=start&&g.end>=end);
+    return gap?{start,end}:null;
+  }
+  function rhQualityDay(key,derived){
+    if(!rhBothCovered(key))return null;
+    return rhBestGap(utcForLocalDayTime(key,'08:00'),utcForLocalDayTime(key,'23:00'),derived,{includeSleep:true,minMinutes:360});
+  }
+  function rhTogetherHoursInfo(key,derived){
+    if(!rhBothCovered(key))return {hours:0,best:null};
+    const start=utcForLocalDayTime(key,'08:00'),end=utcForLocalDayTime(key,'23:00');
+    const gaps=rhFreeIntervals(start,end,derived,{includeSleep:true,minMinutes:30});
+    return {hours:gaps.reduce((s,g)=>s+(g.end-g.start)/3600000,0),best:[...gaps].sort((a,b)=>(b.end-b.start)-(a.end-a.start))[0]||null};
+  }
+  function rhDifficultDay(key,derived){
+    if(!rhBothCovered(key))return null;
+    const reasons=[];
+    state.people.forEach((p,pi)=>{
+      const name=p.name||`Perfil ${pi+1}`;
+      (p.duties||[]).filter(d=>d.kind==='duty'&&String(d.date||d.sourceCheckInDate||'')===key).forEach(d=>{
+        const t=String(d.type||'').toUpperCase();
+        if(t.includes('NIGHT'))reasons.push(`${name}: NIGHT`);
+        else if(t.includes('EARLY'))reasons.push(`${name}: EARLY`);
+        if(Number(d.dutyHours||0)>=Number(state.rules.veryLongDuty||12))reasons.push(`${name}: duty muy largo`);
+      });
+      (p.duties||[]).filter(d=>d.kind==='status'&&d.date===key&&['STBY','RES','SIM','TRG'].includes(String(d.status||'').toUpperCase()))
+        .forEach(d=>reasons.push(`${name}: ${String(d.status).toUpperCase()}`));
+    });
+    derived.filter(e=>e.kind==='recovery'&&eventOverlapsDay(e,key)).forEach(e=>reasons.push(`${state.people[e.person]?.name||`Perfil ${e.person+1}`}: ${e.level==='full'?'recovery completo':'recovery'}`));
+    derived.filter(e=>e.kind==='sleep'&&e.sleepConflict&&eventOverlapsDay(e,key)).forEach(e=>reasons.push(`${state.people[e.person]?.name||`Perfil ${e.person+1}`}: conflicto sueño/duty`));
+    const unique=[...new Set(reasons)];
+    return unique.length?unique:null;
+  }
+  function rhWorkloadMetric(derived){
+    const rows=state.people.map((p,pi)=>{
+      const duties=derived.filter(e=>e.kind==='duty'&&e.person===pi&&dayKey(e.start).startsWith(state.month));
+      const recs=derived.filter(e=>e.kind==='recovery'&&e.person===pi&&dayKey(e.start).startsWith(state.month));
+      return {name:p.name||`Perfil ${pi+1}`,duties:duties.length,hours:duties.reduce((s,e)=>s+Number(e.raw?.dutyHours||0),0),nights:duties.filter(e=>String(e.raw?.type||'').toUpperCase().includes('NIGHT')).length,early:duties.filter(e=>String(e.raw?.type||'').toUpperCase().includes('EARLY')).length,late:duties.filter(e=>String(e.raw?.type||'').toUpperCase().includes('LATE')).length,recoveries:recs.length};
+    });
+    return {rows,total:rows.reduce((s,r)=>s+r.duties,0)};
+  }
+  function rhTogetherSummaryModel(){
+    const derived=allDerived(),[y,m]=state.month.split('-').map(Number),days=new Date(y,m,0).getDate();
+    const b={dateNights:[],qualityDays:[],hours:[],fullDays:[],mornings:[],dinners:[],sleepTogether:[],getaways:[],difficult:[]};
+    let togetherHours=0;
+    for(let d=1;d<=days;d++){
+      const key=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      if(!rhBothCovered(key))continue;
+
+      const q=rhQualityDay(key,derived);
+      if(q)b.qualityDays.push(rhDayItem(key,`${((q.end-q.start)/3600000).toFixed(1)} h seguidas`,`${timeLocal(q.start)}–${timeLocal(q.end)}${rhRecoveryNote(q,derived)}`));
+
+      const hi=rhTogetherHoursInfo(key,derived);
+      togetherHours+=hi.hours;
+      if(hi.hours>0)b.hours.push(rhDayItem(key,`${hi.hours.toFixed(1)} h potenciales`,hi.best?`Mejor tramo ${timeLocal(hi.best.start)}–${timeLocal(hi.best.end)}${rhRecoveryNote(hi.best,derived)}`:''));
+
+      const fd=rhFullDay(key,derived);
+      if(fd)b.fullDays.push(rhDayItem(key,'Día completo para vosotros','09:00–21:00 sin obligaciones'));
+
+      const mo=rhMorning(key,derived);
+      if(mo)b.mornings.push(rhDayItem(key,'Mañana tranquila juntos',`${timeLocal(mo.start)}–${timeLocal(mo.end)}`));
+
+      const dinner=mealWindowForDay(key,state.rules.dinnerTime,derived);
+      if(dinner)b.dinners.push(rhDayItem(key,'Cena compatible',`${timeLocal(dinner.start)}–${timeLocal(dinner.end)}`));
+
+      const sl=rhSleepTogether(key,derived);
+      if(sl)b.sleepTogether.push(rhDayItem(key,'Noche completa juntos','Sin duty ni briefing entre 23:00 y 07:00'));
+
+      const dn=rhDateNight(key,derived);
+      if(dn)b.dateNights.push(rhDayItem(key,'Noche de cita 💜',`Libres desde ${timeLocal(dn.start)} · sin obligaciones antes de ${state.rules.dateNightUntil||'12:00'} del día siguiente${rhRecoveryNote(dn,derived)}`));
+
+      const ga=rhGetaway(key,derived);
+      if(ga)b.getaways.push(rhDayItem(key,'Escapada posible',`Libres 15:00 → 12:00 del día siguiente${rhRecoveryNote(ga,derived)}`));
+
+      const diff=rhDifficultDay(key,derived);
+      if(diff)b.difficult.push(rhDayItem(key,diff.join(' · '),'Mejor coordinar este día con antelación.'));
+    }
+    Object.keys(b).forEach(k=>b[k]=rhUniqueItems(b[k]));
+    const workload=rhWorkloadMetric(derived),ready=rhBothRostersReady();
+    return {ready,metrics:[
+      {id:'dateNights',icon:'🌙',label:'Noches de cita',value:ready?b.dateNights.length:'—',tone:'night',description:`Podéis empezar el plan como tarde a las ${state.rules.dateNightLatestStart||'21:00'} y ninguno tiene una obligación antes de las ${state.rules.dateNightUntil||'12:00'} del día siguiente.`,items:b.dateNights},

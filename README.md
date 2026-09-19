@@ -1,4 +1,4 @@
-# RosterHome v0.9.4 — iPhone Direct + Windows Bridge
+# RosterHome v1.0.0 — iPhone Direct + Windows Bridge
 
 Esta versión permite actualizar CrewLink directamente desde iPhone/Safari sin depender del PC.
 
@@ -165,3 +165,32 @@ Durante `npm run build`, Cloudflare los concatena en `dist/enhancements.js`.
 
 Así el uploader web de GitHub ya no tiene que subir el archivo monolítico.
 La exportación de calendarios permanece aislada en `calendar-export.js`.
+
+## v0.9.5 — fragmentos ultrapequeños
+
+Para evitar que GitHub Web se quede bloqueado incluso con `04.part`, el código de
+enhancements se reparte ahora en muchos archivos `.txt` de aproximadamente 6 KB.
+Cloudflare los concatena durante `npm run build`; no cambian el runtime de la app.
+
+
+## v1.0.0 — calendarios suscritos
+
+RosterHome publica dos feeds privados y persistentes en Cloudflare:
+
+- `RosterHome · Briefings`
+- `RosterHome · Vuelos`
+
+La URL contiene un token aleatorio de 256 bits generado en el dispositivo. Los
+feeds se almacenan en un Durable Object de Cloudflare y no incluyen sueño,
+recovery ni tiempo juntos.
+
+Flujo:
+1. `Reglas → Calendarios automáticos de iPhone`.
+2. Seleccionar perfil y pulsar `Activar / actualizar calendarios`.
+3. Instalar Briefings y Vuelos una sola vez mediante `webcal://`.
+4. RosterHome vuelve a publicar los feeds automáticamente cuando se guardan
+   cambios en el roster y hay conexión.
+
+El endpoint de publicación exige la misma `ROSTERHOME_ACCESS_KEY` privada usada
+por la importación CrewLink. Los endpoints de lectura son accesibles únicamente
+con la URL-token no adivinable.

@@ -1,0 +1,118 @@
+/* RosterHome v0.3.2.3 · briefing/recovery + resilient persistence */
+(function(){
+  // New per-person planning defaults. Existing users keep their saved values.
+  if(state.rules.briefingLead0 == null) state.rules.briefingLead0=105;
+  if(state.rules.briefingLead1 == null) state.rules.briefingLead1=105;
+  if(state.rules.prepMinutes0 == null) state.rules.prepMinutes0=20;
+  if(state.rules.prepMinutes1 == null) state.rules.prepMinutes1=40;
+  if(state.rules.dateNightLatestStart == null) state.rules.dateNightLatestStart='21:00';
+  if(state.rules.dateNightUntil == null) state.rules.dateNightUntil='12:00';
+  saveState();
+
+  let selectedSummaryMetric='togetherDays';
+  let derivedCacheSignature='';
+  let derivedCacheValue=null;
+  let summaryCacheSignature='';
+  let summaryCacheValue=null;
+  const dayStatusCache=new WeakMap();
+  const mealCache=new WeakMap();
+  const coupleWindowCache=new WeakMap();
+  const eventsDayCache=new WeakMap();
+
+  function derivedStateSignature(){
+    const dutyBits=state.people.map(p=>(p.duties||[]).map(d=>[d.kind,d.date,d.checkIn,d.checkout,d.route,d.status,d.type,d.dt,d.ft,(d.flights||[]).map(f=>[f.flightNo,f.dep,f.arr,f.depTime,f.arrTime,f.depDayOffset,f.arrDayOffset]) ]));
+    return JSON.stringify([dutyBits,state.rules]);
+  }
+
+  function numericPersonRule(base,pi,fallback=0){
+    const v=Number(state.rules[`${base}${pi}`]);
+    return Number.isFinite(v)?v:fallback;
+  }
+  function hhmmParts(hhmm){
+    const s=String(hhmm||'').replace(/\D/g,'').slice(0,4).padStart(4,'0');
+    return {h:Number(s.slice(0,2)),m:Number(s.slice(2,4))};
+  }
+  function tzOffsetMillisRh(date,timeZone){
+    const parts=new Intl.DateTimeFormat('en-US',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(date);
+    const o=Object.fromEntries(parts.map(p=>[p.type,p.value]));
+    return Date.UTC(+o.year,+o.month-1,+o.day,+o.hour,+o.minute,+o.second)-date.getTime();
+  }
+  function wallTimeToInstantRh(dateKey,hhmm,timeZone){
+    const [y,mo,d]=dateKey.split('-').map(Number),{h,m}=hhmmParts(hhmm);
+    let guess=new Date(Date.UTC(y,mo-1,d,h,m,0));
+    let off=tzOffsetMillisRh(guess,timeZone);
+    guess=new Date(Date.UTC(y,mo-1,d,h,m,0)-off);
+    const off2=tzOffsetMillisRh(guess,timeZone);
+    if(off2!==off) guess=new Date(Date.UTC(y,mo-1,d,h,m,0)-off2);
+    return guess;
+  }
+  // The briefing is anchored to the FIRST FLIGHT'S OFF-BLOCK / CHOCKS-OUT time,
+  // never to CrewLink C/I. Example: flight 20:45Z with 105 min lead => briefing 19:00Z,
+  // even if the duty/report itself starts at 19:45Z.
+  function firstFlightDepartureInstant(d){
+    const f=d?.flights?.[0];
+    if(!f?.depTime || !d?.checkIn) return null;
+    let dateKey=d.sourceCheckInDate || d.date || String(d.checkIn).slice(0,10);
+    if(f.depDayOffset) dateKey=addDaysKey(dateKey,Number(f.depDayOffset));
+    const build=()=>{
+      if(d.timeBasis==='local_event'){
+        const tz=window.RosterParser?.airportTimeZone?.(f.dep);
+        return tz?wallTimeToInstantRh(dateKey,f.depTime,tz):null;
+      }
+      const {h,m}=hhmmParts(f.depTime);
+      return new Date(`${dateKey}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00Z`);
+    };
+    let dep=build(); if(!dep) return null;
+    const ci=new Date(d.checkIn); let guard=0;
+    // A first sector cannot depart before its own report. The loop only resolves a
+    // midnight/date ambiguity; it does NOT derive departure from the report time.
+    while(dep<ci && guard<2){ dateKey=addDaysKey(dateKey,1); dep=build(); guard++; }
+    return dep;
+  }
+  function briefingForDuty(d,pi){
+    if(d?.kind!=='duty') return null;
+    const lead=numericPersonRule('briefingLead',pi,0);
+    if(lead<=0) return null;
+    const departure=firstFlightDepartureInstant(d);
+    if(!departure) return null;
+    const start=new Date(departure.getTime()-minMs(lead));
+    const checkIn=new Date(d.checkIn);
+    // Visually the briefing/pre-flight block runs only until C/I when it starts
+    // before report, so it does not misleadingly sit on top of the whole duty.
+    // The briefing *time* itself is always `departure - lead`.
+    const end=checkIn>start ? checkIn : new Date(start.getTime()+minMs(1));
+    return {start,end,briefingAt:start,departure,checkIn,lead,flight:d.flights?.[0]||null,insideDuty:start>=checkIn};
+  }
+
+  // Sleep now includes each person's own preparation time before leaving home.
+  sleepForDuty=function(d,pi=0){
+    if(d.kind!=='duty' || !d.checkIn) return null;
+    const prep=numericPersonRule('prepMinutes',pi,0);
+    const reportReady=new Date(new Date(d.checkIn).getTime()-minMs(Number(state.rules.commuteOut||0)));
+    const briefing=briefingForDuty(d,pi);
+    // Never let a configured briefing overlap the protected sleep window. If the
+    // personal briefing starts before the normal leave-for-report time, it becomes
+    // the earlier commitment that determines when preparation must begin.
+    const usesBriefing=Boolean(briefing && briefing.start<reportReady);
+    const firstCommitment=usesBriefing ? briefing.start : reportReady;
+    const wake=new Date(firstCommitment.getTime()-minMs(prep));
+    const start=new Date(wake.getTime()-ms(state.rules.sleepHours));
+    return {
+      start,
+      end:wake,
+      quietStart:new Date(start.getTime()-minMs(state.rules.quietLead)),
+      prep,
+      firstCommitment,
+      firstCommitmentKind:usesBriefing?'briefing':'report-departure',
+      briefingAt:briefing?.start||null,
+      reportReady
+    };
+  };
+
+  allDerived=function(){
+    const sig=derivedStateSignature();
+    if(derivedCacheValue && sig===derivedCacheSignature) return derivedCacheValue;
+    const events=[];
+    state.people.forEach((p,pi)=>dedupeDuties(p.duties).forEach(d=>{
+      if(d.kind==='duty'){
+        events.push({kind:'duty',person:pi,start:new Date(d.checkIn),end:d.checkout?new Date(d.checkout):new Date(new Date(d.checkIn).getTime()+ms(8)),label:dutyLabel(d),raw:d});

@@ -16,5 +16,21 @@
   },
   "browser": {
     "binding": "BROWSER"
-  }
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CALENDAR_STORE",
+        "class_name": "CalendarStore"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "calendar-v1",
+      "new_sqlite_classes": [
+        "CalendarStore"
+      ]
+    }
+  ]
 }

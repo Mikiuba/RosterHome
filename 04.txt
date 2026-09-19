@@ -1,0 +1,52 @@
+      return `${warning}<div class="detail-section"><h3>Qué indica</h3><p class="detail-explainer">Sueño protegido calculado hacia atrás desde la <b>primera obligación real</b> previa al vuelo y vuestro tiempo personal de preparación. La obligación que manda en este cálculo se muestra explícitamente abajo.</p>${detailRow('Persona',state.people[e.person].name)}${detailRow('Desde',localDateTime(e.start))}${detailRow('Despertar objetivo',localDateTime(e.end))}${detailRow('Sueño objetivo',`${state.rules.sleepHours} h`)}${detailRow('Preparación personal',`${prep} min`)}${detailRow('Primera obligación',firstKind)}${detailRow('Hora primera obligación',firstAt)}${detailRow('Salida hacia el report',reportReady)}${detailRow('Trayecto a report',`${state.rules.commuteOut} min`)}${detailRow('Report CrewLink',report)}${detailRow('Ruta relacionada',e.raw?.route||'Duty')}</div>`;
+    }
+    if(e.kind==='recovery'){
+      return `${baseEventDetailHtml(e)}<div class="detail-section recovery-couple-note"><h3>❤️ Convivencia</h3><p class="detail-explainer">Este recovery <b>sí cuenta como tiempo potencial en casa juntos</b> si la otra persona también está disponible. Se muestra como una capa superpuesta porque estar juntos no elimina la necesidad de recovery.</p></div>`;
+    }
+    if(e.kind==='couple'){
+      const recs=e.recoveryOverlays||recoveryOverlaysForInterval(e,allDerived()),note=recs.length?`<div class="recovery-in-window"><b>↗ Esta ventana incluye recovery</b><span>${esc(recoveryOverlayLabel(e,allDerived()))}. El tiempo sigue contando como coincidencia en casa, pero el recovery mantiene prioridad.</span></div>`:'';
+      return `<div class="detail-section"><h3>Qué indica</h3><p class="detail-explainer">Es la mejor ventana continua del día, entre 08:00 y 23:00, en la que ninguno está bloqueado por duty, briefing o sueño protegido. <b>Recovery parcial y completo cuentan como tiempo potencial juntos.</b></p>${detailRow('Desde',localDateTime(e.start))}${detailRow('Hasta',localDateTime(e.end))}${detailRow('Tiempo potencial',`${((e.end-e.start)/3600000).toFixed(1)} h`)}</div>${note}`;
+    }
+    return baseEventDetailHtml(e);
+  };
+
+  syncCalendarDensityButtons=function(){
+    document.querySelectorAll('[data-calendar-density]').forEach(b=>b.classList.toggle('active',b.dataset.calendarDensity===state.calendarDensity));
+    const hint=$('clarityHint'); if(hint)hint.textContent=state.calendarDensity==='simple'?'Un único resultado compartido por día':'Duty, briefing, sueño, recovery y demás detalle';
+  };
+  function simpleStatusHtml(key,derived,context='month'){
+    const s=dayPlanStatus(key,derived),time=s.best?`${timeLocal(s.best.start)}–${timeLocal(s.best.end)}`:'',hasRecovery=!!s.recoveryOverlays?.length;
+    const shortLabel=s.level==='together'?'Juntos':s.level==='partial'?'Un rato':s.level==='busy'?'Ocupado':'Sin datos';
+    return `<button type="button" class="simple-day-status ${s.level} ${context}" data-open-day="${key}" data-mobile-day="${key}">
+      <span class="simple-status-main"><span class="simple-status-emoji">${s.emoji}</span><span class="simple-status-label"><span class="simple-status-full">${esc(s.label)}</span><span class="simple-status-short">${esc(shortLabel)}</span></span></span>
+      ${time?`<span class="simple-status-time">${esc(time)}</span>`:''}
+      ${hasRecovery?'<span class="simple-status-recovery" title="Incluye recovery">↻</span>':''}
+    </button>`;
+  }
+
+  renderMonthCalendar=function(derived){
+    const [year,month]=state.month.split('-').map(Number),first=new Date(year,month-1,1),days=new Date(year,month,0).getDate(),lead=(first.getDay()+6)%7;
+    $('monthTitle').textContent=monthLabel(state.month);$('calendar').className='calendar month-view split-people';
+    const names=['L','M','X','J','V','S','D'];let html=names.map(x=>`<div class="dow">${x}</div>`).join('');
+    for(let i=0;i<lead;i++)html+='<div class="day other"></div>';const todayKey=dayKey(new Date());
+    for(let d=1;d<=days;d++){
+      const key=`${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      html+=`<div class="day ${key===todayKey?'today':''}"><button type="button" class="daynum daynum-btn" data-open-day="${key}" aria-label="Abrir ${esc(localDayLabel(key))}">${d}</button>`;
+      if(state.calendarDensity==='simple')html+=simpleStatusHtml(key,derived,'month');
+      else{
+        const ev=eventsForDay(key,derived,false),p0=ev.filter(e=>e.person===0),p1=ev.filter(e=>e.person===1),shared=ev.filter(e=>e.person==null);
+        html+='<div class="month-person-lanes">';
+        for(const [pi,list] of [[0,p0],[1,p1]]){const max=4;html+=`<div class="month-person-lane person-${pi}" aria-label="${esc(state.people[pi].name)}">`;list.slice(0,max).forEach(e=>html+=renderEventButton(e,'month-person-event','month'));if(list.length>max)html+=`<button type="button" class="more-events lane-more" data-open-day="${key}">+${list.length-max}</button>`;html+='</div>';}
+        html+='</div>';if(shared.length)html+=`<div class="shared-events">${shared.map(e=>renderEventButton(e,'shared-event','month')).join('')}</div>`;
+      }
+      html+='</div>';
+    }
+    $('calendar').innerHTML=html;
+  };
+  renderWeekCalendar=function(derived){
+    const start=mondayKey(state.focusDate),todayKey=dayKey(new Date());$('monthTitle').textContent=shortWeekTitle(start);$('calendar').className='calendar week-view split-people';let html='<div class="week-grid">';
+    for(let i=0;i<7;i++){
+      const key=addDaysKey(start,i),weekday=localDayLabel(key,{weekday:'short'}),date=localDayLabel(key,{day:'numeric',month:'short'});
+      html+=`<section class="week-day ${key===todayKey?'today':''}"><button type="button" class="week-day-head" data-open-day="${key}"><span>${esc(weekday)}</span><b>${esc(date)}</b></button>`;
+      if(state.calendarDensity==='simple')html+=`<div class="simple-week-wrap">${simpleStatusHtml(key,derived,'week')}</div>`;
+      else{

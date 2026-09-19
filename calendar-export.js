@@ -1,4 +1,4 @@
-/* RosterHome v0.9.4 · standalone calendar exporter
+/* RosterHome v1.0.0 · standalone calendar exporter
  * Kept separate from enhancements.js so GitHub/iPhone cache issues cannot leave
  * the buttons visible without the export logic.
  */
@@ -237,4 +237,11 @@
 
   syncNames();
   ['name0','name1'].forEach(id=>$(id)?.addEventListener('input',()=>setTimeout(syncNames,0)));
+
+  window.RosterHomeCalendarExport={
+    build,
+    makeIcs,
+    selectedPeople,
+    calendarTitle
+  };
 })();

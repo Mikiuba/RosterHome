@@ -1,0 +1,58 @@
+      {id:'qualityDays',icon:'❤️',label:'Tiempo de calidad',value:ready?b.qualityDays.length:'—',tone:'heart',description:'Días con al menos 6 horas seguidas potenciales para los dos entre 08:00 y 23:00.',items:b.qualityDays},
+      {id:'togetherHours',icon:'🕒',label:'Horas juntos',value:ready?`${Math.round(togetherHours)} h`:'—',tone:'blue',description:'Tiempo potencial compartido entre 08:00 y 23:00. Recovery puede contar como tiempo en casa y se señala cuando corresponde.',items:b.hours},
+      {id:'mornings',icon:'☀️',label:'Mañanas juntos',value:ready?b.mornings.length:'—',tone:'sun',description:'Mañanas con al menos 3 horas seguidas disponibles para los dos entre 08:00 y 12:00.',items:b.mornings},
+      {id:'dinners',icon:'🍽️',label:'Cenas juntos',value:ready?b.dinners.length:'—',tone:'dinner',description:`Una hora compatible alrededor de vuestra cena preferida (${state.rules.dinnerTime}).`,items:b.dinners},
+      {id:'sleepTogether',icon:'🛌',label:'Dormir juntos',value:ready?b.sleepTogether.length:'—',tone:'sleep',description:'Noches en las que ningún duty, briefing o actividad operativa rompe la franja 23:00–07:00.',items:b.sleepTogether},
+      {id:'fullDays',icon:'🏖️',label:'Días completos',value:ready?b.fullDays.length:'—',tone:'beach',description:'Días en los que tenéis libre de forma continua la franja 09:00–21:00.',items:b.fullDays},
+      {id:'getaways',icon:'🧳',label:'Escapadas',value:ready?b.getaways.length:'—',tone:'trip',description:'Ventanas desde las 15:00 hasta las 12:00 del día siguiente sin obligaciones operativas. Recovery se conserva como aviso.',items:b.getaways},
+      {id:'difficult',icon:'⚠️',label:'A coordinar',value:ready?b.difficult.length:'—',tone:'warn',description:'EARLY, NIGHT, duties muy largos, standby/reserva, recovery o conflictos que conviene tener presentes antes de hacer planes.',items:b.difficult},
+      {id:'workload',icon:'⚖️',label:'Carga del mes',value:ready?workload.total:'—',tone:'load',description:'Comparación sencilla de la carga operativa de ambos, separada de las estadísticas de pareja.',items:[],workload}
+    ]};
+  }
+  function rhOpenSummarySheet(metric){
+    const sheet=$('summarySheet');if(!sheet)return;
+    $('summarySheetKicker').textContent='JUNTOS · '+monthLabel(state.month).toUpperCase();
+    $('summarySheetTitle').textContent=`${metric.icon} ${metric.label}`;
+    $('summarySheetSubtitle').textContent=metric.description;
+    const body=$('summarySheetBody');
+    if(metric.id==='workload'){
+      body.innerHTML=metric.workload.rows.map((r,pi)=>`<div class="together-workload p${pi}"><div class="together-workload-name">${esc(r.name)}</div><div class="together-workload-grid"><div><span>Duties</span><b>${r.duties}</b></div><div><span>Duty time</span><b>${r.hours.toFixed(1)} h</b></div><div><span>EARLY</span><b>${r.early}</b></div><div><span>LATE</span><b>${r.late}</b></div><div><span>NIGHT</span><b>${r.nights}</b></div><div><span>Recovery</span><b>${r.recoveries}</b></div></div></div>`).join('');
+    }else if(!metric.items.length){
+      body.innerHTML=`<div class="together-empty"><span>${metric.icon}</span><b>${metric.value==='—'?'Importa ambos rosters':'Nada por aquí este mes'}</b><p>${metric.value==='—'?'Cuando estén los dos rosters, RosterHome calculará este apartado automáticamente.':'No hay fechas que cumplan esta condición con los rosters actuales.'}</p></div>`;
+    }else{
+      body.innerHTML=metric.items.map(i=>`<button type="button" class="together-detail-row" data-together-day="${i.key}"><span class="together-detail-date">${esc(localDayLabel(i.key,{weekday:'short',day:'numeric',month:'short'}))}</span><span class="together-detail-copy"><b>${esc(i.text)}</b>${i.sub?`<small>${esc(i.sub)}</small>`:''}</span><i>›</i></button>`).join('');
+    }
+    sheet.classList.remove('hidden');sheet.setAttribute('aria-hidden','false');document.body.classList.add('modal-open');
+  }
+  function rhCloseSummarySheet(){
+    const sheet=$('summarySheet');if(!sheet)return;
+    sheet.classList.add('hidden');sheet.setAttribute('aria-hidden','true');
+    if($('eventModal')?.classList.contains('hidden'))document.body.classList.remove('modal-open');
+  }
+
+  renderSummary=function(){
+    const model=rhTogetherSummaryModel(),names=state.people.map(p=>p.name||'Perfil').join(' + ');
+    if($('togetherTitle'))$('togetherTitle').textContent=`💜 ${names}`;
+    if($('togetherMonth'))$('togetherMonth').textContent=monthLabel(state.month);
+    if($('togetherSubtitle'))$('togetherSubtitle').textContent=model.ready
+      ?'Cuándo podéis hacer planes de verdad, descansar juntos y saber de un vistazo qué días merece la pena proteger.'
+      :'Importa los dos rosters y RosterHome convertirá los horarios en planes fáciles de entender.';
+    if($('stats'))$('stats').innerHTML=model.metrics.map(m=>`<button type="button" class="together-stat tone-${m.tone}" data-together-metric="${m.id}"><span class="together-stat-icon">${m.icon}</span><span class="together-stat-value">${esc(m.value)}</span><span class="together-stat-label">${esc(m.label)}</span><small>${m.id==='workload'?'Ver comparación':'Ver fechas'}</small></button>`).join('');
+    window.__rhTogetherMetrics=model.metrics;
+  };
+
+  $('stats')?.addEventListener('click',e=>{
+    const b=e.target.closest('[data-together-metric]');if(!b)return;
+    e.preventDefault();e.stopImmediatePropagation();
+    const metric=(window.__rhTogetherMetrics||[]).find(m=>m.id===b.dataset.togetherMetric);
+    if(metric)rhOpenSummarySheet(metric);
+  },true);
+  $('summarySheet')?.addEventListener('click',e=>{
+    if(e.target.closest('[data-close-summary-sheet]')){rhCloseSummarySheet();return;}
+    const d=e.target.closest('[data-together-day]');
+    if(d){
+      rhCloseSummarySheet();
+      openDay(d.dataset.togetherDay);
+      document.querySelector('.tab[data-view="calendarView"]')?.click();
+    }
+  });

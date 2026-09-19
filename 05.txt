@@ -1,0 +1,31 @@
+        const ev=eventsForDay(key,derived,true),p0=ev.filter(e=>e.person===0),p1=ev.filter(e=>e.person===1),shared=ev.filter(e=>e.person==null);
+        html+=`<div class="week-person-head"><span>${esc(state.people[0].name)}</span><span>${esc(state.people[1].name)}</span></div><div class="week-events person-split">`;
+        for(const [pi,list] of [[0,p0],[1,p1]])html+=`<div class="week-person-lane person-${pi}">${list.length?list.map(e=>renderEventButton(e,'week-event','week')).join(''):'<div class="empty-person-lane">—</div>'}</div>`;
+        html+='</div>';if(shared.length)html+=`<div class="week-shared">${shared.map(e=>renderEventButton(e,'week-event shared-event','week')).join('')}</div>`;
+      }
+      html+='</section>';
+    }
+    $('calendar').innerHTML=html+'</div>';
+  };
+  const baseSegmentBlockMeta=segmentBlockMeta;
+  segmentBlockMeta=function(seg){ return seg.e.kind==='briefing'?`${timeLocal(seg.e.briefingAt||seg.e.start)} · vuelo ${timeLocal(seg.e.departure)}`:baseSegmentBlockMeta(seg); };
+  renderDayCalendar=function(derived){
+    const key=state.focusDate,todayKey=dayKey(new Date());$('monthTitle').textContent=localDayLabel(key,{weekday:'long',day:'numeric',month:'long',year:'numeric'});$('calendar').className='calendar day-view split-people';
+    if(state.calendarDensity==='simple'){
+      const s=dayPlanStatus(key,derived),lunch=mealWindowForDay(key,state.rules.lunchTime,derived),dinner=mealWindowForDay(key,state.rules.dinnerTime,derived);
+      let html=`<div class="simple-day-card ${s.level} ${key===todayKey?'today':''}"><div class="simple-day-icon">${s.emoji}</div><h2>${esc(s.label)}</h2><p>${esc(s.detail)}</p>`;
+      if(s.best)html+=`<div class="simple-day-window"><span>Mejor momento juntos</span><b>${timeLocal(s.best.start)}–${timeLocal(s.best.end)}</b></div>`;
+      if(s.best&&s.recoveryOverlays?.length)html+=`<div class="simple-recovery-overlay-note"><b>🟡 También toca recovery</b><span>${esc(recoveryOverlayLabel(s.best,derived))}. Cuenta como tiempo juntos en casa, pero conviene mantener el día tranquilo.</span></div>`;
+      html+=`<div class="simple-day-window"><span>Comida</span><b>${lunch?`Posible · ${timeLocal(lunch.start)}–${timeLocal(lunch.end)}`:'Difícil en el horario preferido'}</b></div><div class="simple-day-window"><span>Cena</span><b>${dinner?`Posible · ${timeLocal(dinner.start)}–${timeLocal(dinner.end)}`:'Difícil en el horario preferido'}</b></div><p class="simple-switch-note">Cambia a <b>Completo</b> para ver duties, briefings, sueño y recovery en capas separadas.</p></div>`;
+      $('calendar').innerHTML=html;return;
+    }
+    const ev=eventsForDay(key,derived,true),allDay=ev.filter(e=>e.kind==='status'),rawSegments=ev.filter(e=>e.kind!=='status'&&e.start&&e.end).map(e=>timelineSegment(e,key)).filter(Boolean),segments=assignPersonTimelineLanes(rawSegments),H=64,dayHeight=24*H;
+    let html=`<div class="day-agenda ${key===todayKey?'today':''}"><div class="day-agenda-head"><span>${ev.length} ${ev.length===1?'evento':'eventos'}</span><b>${esc(state.rules.homeTz)}</b></div><div class="day-person-head"><span>${esc(state.people[0].name)}</span><span>${esc(state.people[1].name)}</span></div>`;
+    if(allDay.length){const a0=allDay.filter(e=>e.person===0),a1=allDay.filter(e=>e.person===1),ash=allDay.filter(e=>e.person==null);html+='<div class="all-day-row split-all-day"><span class="all-day-label">Todo el día</span><div class="all-day-people">';for(const [pi,list] of [[0,a0],[1,a1]])html+=`<div class="all-day-person person-${pi}">${list.map(e=>renderEventButton(e,'all-day-event','day')).join('')||'<span class="empty-person-lane">—</span>'}</div>`;html+='</div></div>';if(ash.length)html+=`<div class="all-day-shared">${ash.map(e=>renderEventButton(e,'all-day-event shared-event','day')).join('')}</div>`;}
+    if(!segments.length&&!allDay.length)html+='<div class="empty-agenda"><strong>Día despejado</strong><span>No hay eventos calculados para este día.</span></div>';
+    else if(segments.length){html+=`<div class="timeline-scroll"><div class="timeline-canvas split-timeline" style="height:${dayHeight}px">`;for(let h=0;h<24;h++)html+=`<div class="timeline-hour-label" style="top:${h*H-8}px">${String(h).padStart(2,'0')}:00</div><div class="timeline-hour-line" style="top:${h*H}px"></div>`;html+='<div class="timeline-person-divider" aria-hidden="true"></div>';if(key===todayKey){const nowMin=localMinuteOfDay(new Date());html+=`<div class="timeline-now" style="top:${nowMin/60*H}px"><span></span></div>`;}for(const seg of segments){const e=seg.e,id=registerEvent(e),top=seg.startMin/60*H,height=Math.max((seg.endMin-seg.startMin)/60*H,30);let leftPct,widthPct;if(e.person==null){leftPct=0;widthPct=100;}else{const sideBase=e.person===0?0:50,subWidth=50/seg.laneCount;leftPct=sideBase+seg.lane*subWidth;widthPct=subWidth;}const compact=height<48?' compact':'';html+=`<button type="button" class="timeline-event ${eventClass(e)} ${personLaneClass(e)}${compact}" data-event-id="${id}" style="top:${top}px;height:${height}px;left:calc(${leftPct}% + 5px);width:calc(${widthPct}% - 9px)" aria-label="Ver detalle de ${esc(eventText(e))}"><span class="timeline-event-title">${esc(eventBlockTitle(e))}</span><span class="timeline-event-meta">${esc(segmentBlockMeta(seg))}</span>${height>=72?`<span class="timeline-event-sub">${esc(eventSubtitle(e))}</span>`:''}</button>`;}html+='</div></div>';}
+    html+='</div>';$('calendar').innerHTML=html;const scroll=$('calendar').querySelector('.timeline-scroll'),renderVersion=window.__rhRenderVersion;if(scroll&&segments.length){const first=Math.min(...segments.map(s=>s.startMin));requestAnimationFrame(()=>{if(scroll.isConnected&&window.__rhRenderVersion===renderVersion&&state.calendarMode==='day')scroll.scrollTop=Math.max(0,(first/60)*H-H);});}
+  };
+
+  function summaryModel(){
+    const derived=allDerived();

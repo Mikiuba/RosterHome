@@ -1,4 +1,4 @@
-const CACHE='rosterhome-v0.9.4';
+const CACHE='rosterhome-v1.0.0';
 const CORE=[
   './',
   './index.html',
@@ -11,6 +11,7 @@ const CORE=[
   './app.js',
   './enhancements.js',
   './calendar-export.js',
+  './calendar-subscriptions.js',
   './crewlink-changes.js',
   './crewlink-sync.js'
 ];
@@ -60,7 +61,7 @@ self.addEventListener('fetch',event=>{
   const url=new URL(request.url);
 
   // API/CrewLink always requires internet; never fake a cached API response.
-  if(url.origin===self.location.origin && url.pathname.startsWith('/api/')) return;
+  if(url.origin===self.location.origin && (url.pathname.startsWith('/api/')||url.pathname.startsWith('/calendar/'))) return;
 
   // Same-origin navigation: network first so updates arrive promptly, offline shell as fallback.
   if(url.origin===self.location.origin && request.mode==='navigate'){

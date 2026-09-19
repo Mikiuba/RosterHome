@@ -1,0 +1,40 @@
+    const sig=`${state.month}|${derivedStateSignature()}|${state.rules.lunchTime}|${state.rules.dinnerTime}|${state.rules.mealFlex}`;
+    if(summaryCacheValue && summaryCacheSignature===sig)return summaryCacheValue;
+    const [y,m]=state.month.split('-').map(Number),days=new Date(y,m,0).getDate(),dayRows=[];
+    for(let d=1;d<=days;d++){
+      const key=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const status=dayPlanStatus(key,derived),lunch=mealWindowForDay(key,state.rules.lunchTime,derived),dinner=mealWindowForDay(key,state.rules.dinnerTime,derived);
+      const has0=derived.some(e=>e.kind==='duty'&&e.person===0&&eventOverlapsDay(e,key)),has1=derived.some(e=>e.kind==='duty'&&e.person===1&&eventOverlapsDay(e,key));
+      dayRows.push({key,status,lunch,dinner,bothWork:has0&&has1});
+    }
+    const togetherDays=dayRows.filter(x=>x.status.level==='together'),partialDays=dayRows.filter(x=>x.status.level==='partial'),busyDays=dayRows.filter(x=>x.status.level==='busy'),lunchDays=dayRows.filter(x=>x.lunch),dinnerDays=dayRows.filter(x=>x.dinner),bothWorkDays=dayRows.filter(x=>x.bothWork),togetherHours=dayRows.reduce((sum,x)=>sum+x.status.totalHours,0);
+    const metrics=[
+      {id:'togetherDays',label:'❤️ Días para pasar juntos',value:togetherDays.length,items:togetherDays.map(x=>({key:x.key,text:x.status.detail}))},
+      {id:'partialDays',label:'🫶 Coincidimos un rato',value:partialDays.length,items:partialDays.map(x=>({key:x.key,text:x.status.detail}))},
+      {id:'busyDays',label:'🔒 Días ocupados',value:busyDays.length,items:busyDays.map(x=>({key:x.key,text:x.status.detail}))},
+      {id:'togetherHours',label:'🕒 Horas potenciales juntos',value:`${Math.round(togetherHours)} h`,items:dayRows.filter(x=>x.status.totalHours>0).sort((a,b)=>b.status.totalHours-a.status.totalHours).map(x=>({key:x.key,text:`${x.status.totalHours.toFixed(1)} h potenciales entre 08:00 y 23:00${x.status.best&&x.status.recoveryOverlays?.length?' · incluye recovery':''}`}))},
+      {id:'lunchDays',label:'🥗 Comidas compatibles',value:lunchDays.length,items:lunchDays.map(x=>({key:x.key,text:`Comida posible ${timeLocal(x.lunch.start)}–${timeLocal(x.lunch.end)}`}))},
+      {id:'dinnerDays',label:'🍽️ Cenas compatibles',value:dinnerDays.length,items:dinnerDays.map(x=>({key:x.key,text:`Cena posible ${timeLocal(x.dinner.start)}–${timeLocal(x.dinner.end)}`}))},
+      {id:'bothWorkDays',label:'✈️ Días trabajando los dos',value:bothWorkDays.length,items:bothWorkDays.map(x=>({key:x.key,text:'Ambos tienen duty en algún momento del día.'}))}
+    ];
+    summaryCacheSignature=sig; summaryCacheValue={derived,dayRows,metrics}; return summaryCacheValue;
+  }
+  function renderSummaryDetail(model){
+    const metric=model.metrics.find(x=>x.id===selectedSummaryMetric)||model.metrics[0];selectedSummaryMetric=metric.id;
+    document.querySelectorAll('[data-summary-metric]').forEach(x=>x.classList.toggle('active',x.dataset.summaryMetric===metric.id));
+    if($('summaryDrillTitle'))$('summaryDrillTitle').textContent=metric.label;
+    if($('summaryDrilldown'))$('summaryDrilldown').innerHTML=metric.items.length?metric.items.slice(0,31).map(i=>`<button type="button" class="summary-drill-row" data-summary-day="${i.key}"><span>${esc(localDayLabel(i.key,{weekday:'short',day:'numeric',month:'short'}))}</span><b>${esc(i.text)}</b><i>›</i></button>`).join(''):'<div class="muted">No hay días en esta categoría.</div>';
+  }
+  function renderWorkloadComparison(derived){
+    if(!$('workloadCompare'))return;
+    const rows=state.people.map((p,pi)=>{const duties=derived.filter(e=>e.kind==='duty'&&e.person===pi&&dayKey(e.start).startsWith(state.month)),recs=derived.filter(e=>e.kind==='recovery'&&e.person===pi&&dayKey(e.start).startsWith(state.month)),hours=duties.reduce((s,e)=>s+Number(e.raw?.dutyHours||0),0),nights=duties.filter(e=>String(e.raw?.type||'').toUpperCase().includes('NIGHT')).length,earlyLate=duties.filter(e=>/EARLY|LATE/.test(String(e.raw?.type||'').toUpperCase())).length;return {name:p.name,duties:duties.length,hours,recs:recs.length,nights,earlyLate};});
+    $('workloadCompare').innerHTML=rows.map((r,pi)=>`<div class="workload-person p${pi}"><h4>${esc(r.name)}</h4><div><span>Duties</span><b>${r.duties}</b></div><div><span>Duty time aprox.</span><b>${r.hours.toFixed(1)} h</b></div><div><span>NIGHT</span><b>${r.nights}</b></div><div><span>EARLY/LATE</span><b>${r.earlyLate}</b></div><div><span>Recoveries</span><b>${r.recs}</b></div></div>`).join('');
+  }
+  renderSummary=function(){
+    const model=summaryModel(),derived=model.derived;
+    $('stats').innerHTML=model.metrics.map(m=>`<button type="button" class="stat stat-button ${m.id===selectedSummaryMetric?'active':''}" data-summary-metric="${m.id}"><span class="muted">${esc(m.label)}</span><b>${esc(m.value)}</b><small>Toca para ver los días</small></button>`).join('');
+    renderSummaryDetail(model);
+    const windows=model.dayRows.filter(x=>x.status.best).sort((a,b)=>(b.status.best.end-b.status.best.start)-(a.status.best.end-a.status.best.start));
+    $('bestWindows').innerHTML=windows.slice(0,8).map(x=>`<button type="button" class="summary-row summary-row-button" data-summary-day="${x.key}"><span>${esc(localDayLabel(x.key,{weekday:'short',day:'numeric',month:'short'}))}</span><b>${timeLocal(x.status.best.start)}–${timeLocal(x.status.best.end)} · ${((x.status.best.end-x.status.best.start)/3600000).toFixed(1)} h${x.status.recoveryOverlays?.length?' · 🟡 recovery':''}</b></button>`).join('')||'<div class="muted">Importa ambos rosters para calcularlo.</div>';
+    const issues=[];
+    derived.filter(e=>e.kind==='recovery'&&dayKey(e.start).startsWith(state.month)).forEach(e=>issues.push({date:dayKey(e.start),txt:`${state.people[e.person].name}: ${e.level==='full'?'recovery completo':'recovery parcial'}`}));
