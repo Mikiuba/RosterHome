@@ -735,7 +735,7 @@ html[data-connectivity="offline"] .cl-progress{
 
 
 /* =========================================================
-   RosterHome v0.9.2 · Calendar export
+   RosterHome v0.9.4 · Calendar export
    ========================================================= */
 .calendar-export-card{
   margin-top:16px;
@@ -766,3 +766,11 @@ html[data-connectivity="offline"] .cl-progress{
   .calendar-export-actions{display:grid;grid-template-columns:1fr}
   .calendar-export-actions .btn{width:100%}
 }
+
+.calendar-export-status{
+  min-height:1.3em;
+  margin:10px 0 0;
+  font-size:11px;
+}
+.calendar-export-status[data-kind="ok"]{color:#72dfc2}
+.calendar-export-status[data-kind="error"]{color:#ff8296}

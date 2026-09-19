@@ -1,4 +1,4 @@
-# RosterHome v0.9.2 — iPhone Direct + Windows Bridge
+# RosterHome v0.9.4 — iPhone Direct + Windows Bridge
 
 Esta versión permite actualizar CrewLink directamente desde iPhone/Safari sin depender del PC.
 
@@ -143,3 +143,25 @@ Los eventos usan UID estables y los calendarios incluyen `X-WR-CALNAME`, por lo
 que están preparados para mantenerse separados en Apple Calendar. En iPhone se
 usa la hoja de compartir cuando está disponible y, como fallback, se descarga
 el `.ics`.
+
+
+## v0.9.3 — exportación de calendario robusta
+
+La exportación de Briefings/Vuelos se ha separado de `enhancements.js` y vive en
+`calendar-export.js`. Esto evita que una subida/caché antigua de
+`enhancements.js` deje visibles los botones sin lógica asociada.
+
+- iPhone/iPad: intenta primero la hoja nativa de compartir con un archivo `.ics`.
+- fallback universal: descarga un `.ics` mediante Blob URL.
+- siempre muestra estado debajo de los botones (preparando, exportado, cancelado
+  o error).
+- el Service Worker precachea también `calendar-export.js`.
+
+## v0.9.4 — enhancements dividido
+
+`enhancements.js` del repositorio ahora es solo un stub de unos pocos bytes.
+El código real está dividido en `enhancements-parts/01.part`, `02.part`, etc.
+Durante `npm run build`, Cloudflare los concatena en `dist/enhancements.js`.
+
+Así el uploader web de GitHub ya no tiene que subir el archivo monolítico.
+La exportación de calendarios permanece aislada en `calendar-export.js`.

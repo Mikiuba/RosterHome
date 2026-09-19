@@ -1,4 +1,4 @@
-const CACHE='rosterhome-v0.9.2';
+const CACHE='rosterhome-v0.9.4';
 const CORE=[
   './',
   './index.html',
@@ -10,6 +10,7 @@ const CORE=[
   './ftl-engine.js',
   './app.js',
   './enhancements.js',
+  './calendar-export.js',
   './crewlink-changes.js',
   './crewlink-sync.js'
 ];

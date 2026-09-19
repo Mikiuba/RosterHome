@@ -1,0 +1,276 @@
+/* RosterHome v0.3.2.3 · briefing/recovery + resilient persistence */
+(function(){
+  // New per-person planning defaults. Existing users keep their saved values.
+  if(state.rules.briefingLead0 == null) state.rules.briefingLead0=105;
+  if(state.rules.briefingLead1 == null) state.rules.briefingLead1=105;
+  if(state.rules.prepMinutes0 == null) state.rules.prepMinutes0=20;
+  if(state.rules.prepMinutes1 == null) state.rules.prepMinutes1=40;
+  if(state.rules.dateNightLatestStart == null) state.rules.dateNightLatestStart='21:00';
+  if(state.rules.dateNightUntil == null) state.rules.dateNightUntil='12:00';
+  saveState();
+
+  let selectedSummaryMetric='togetherDays';
+  let derivedCacheSignature='';
+  let derivedCacheValue=null;
+  let summaryCacheSignature='';
+  let summaryCacheValue=null;
+  const dayStatusCache=new WeakMap();
+  const mealCache=new WeakMap();
+  const coupleWindowCache=new WeakMap();
+  const eventsDayCache=new WeakMap();
+
+  function derivedStateSignature(){
+    const dutyBits=state.people.map(p=>(p.duties||[]).map(d=>[d.kind,d.date,d.checkIn,d.checkout,d.route,d.status,d.type,d.dt,d.ft,(d.flights||[]).map(f=>[f.flightNo,f.dep,f.arr,f.depTime,f.arrTime,f.depDayOffset,f.arrDayOffset]) ]));
+    return JSON.stringify([dutyBits,state.rules]);
+  }
+
+  function numericPersonRule(base,pi,fallback=0){
+    const v=Number(state.rules[`${base}${pi}`]);
+    return Number.isFinite(v)?v:fallback;
+  }
+  function hhmmParts(hhmm){
+    const s=String(hhmm||'').replace(/\D/g,'').slice(0,4).padStart(4,'0');
+    return {h:Number(s.slice(0,2)),m:Number(s.slice(2,4))};
+  }
+  function tzOffsetMillisRh(date,timeZone){
+    const parts=new Intl.DateTimeFormat('en-US',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(date);
+    const o=Object.fromEntries(parts.map(p=>[p.type,p.value]));
+    return Date.UTC(+o.year,+o.month-1,+o.day,+o.hour,+o.minute,+o.second)-date.getTime();
+  }
+  function wallTimeToInstantRh(dateKey,hhmm,timeZone){
+    const [y,mo,d]=dateKey.split('-').map(Number),{h,m}=hhmmParts(hhmm);
+    let guess=new Date(Date.UTC(y,mo-1,d,h,m,0));
+    let off=tzOffsetMillisRh(guess,timeZone);
+    guess=new Date(Date.UTC(y,mo-1,d,h,m,0)-off);
+    const off2=tzOffsetMillisRh(guess,timeZone);
+    if(off2!==off) guess=new Date(Date.UTC(y,mo-1,d,h,m,0)-off2);
+    return guess;
+  }
+  // The briefing is anchored to the FIRST FLIGHT'S OFF-BLOCK / CHOCKS-OUT time,
+  // never to CrewLink C/I. Example: flight 20:45Z with 105 min lead => briefing 19:00Z,
+  // even if the duty/report itself starts at 19:45Z.
+  function firstFlightDepartureInstant(d){
+    const f=d?.flights?.[0];
+    if(!f?.depTime || !d?.checkIn) return null;
+    let dateKey=d.sourceCheckInDate || d.date || String(d.checkIn).slice(0,10);
+    if(f.depDayOffset) dateKey=addDaysKey(dateKey,Number(f.depDayOffset));
+    const build=()=>{
+      if(d.timeBasis==='local_event'){
+        const tz=window.RosterParser?.airportTimeZone?.(f.dep);
+        return tz?wallTimeToInstantRh(dateKey,f.depTime,tz):null;
+      }
+      const {h,m}=hhmmParts(f.depTime);
+      return new Date(`${dateKey}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00Z`);
+    };
+    let dep=build(); if(!dep) return null;
+    const ci=new Date(d.checkIn); let guard=0;
+    // A first sector cannot depart before its own report. The loop only resolves a
+    // midnight/date ambiguity; it does NOT derive departure from the report time.
+    while(dep<ci && guard<2){ dateKey=addDaysKey(dateKey,1); dep=build(); guard++; }
+    return dep;
+  }
+  function briefingForDuty(d,pi){
+    if(d?.kind!=='duty') return null;
+    const lead=numericPersonRule('briefingLead',pi,0);
+    if(lead<=0) return null;
+    const departure=firstFlightDepartureInstant(d);
+    if(!departure) return null;
+    const start=new Date(departure.getTime()-minMs(lead));
+    const checkIn=new Date(d.checkIn);
+    // Visually the briefing/pre-flight block runs only until C/I when it starts
+    // before report, so it does not misleadingly sit on top of the whole duty.
+    // The briefing *time* itself is always `departure - lead`.
+    const end=checkIn>start ? checkIn : new Date(start.getTime()+minMs(1));
+    return {start,end,briefingAt:start,departure,checkIn,lead,flight:d.flights?.[0]||null,insideDuty:start>=checkIn};
+  }
+
+  // Sleep now includes each person's own preparation time before leaving home.
+  sleepForDuty=function(d,pi=0){
+    if(d.kind!=='duty' || !d.checkIn) return null;
+    const prep=numericPersonRule('prepMinutes',pi,0);
+    const reportReady=new Date(new Date(d.checkIn).getTime()-minMs(Number(state.rules.commuteOut||0)));
+    const briefing=briefingForDuty(d,pi);
+    // Never let a configured briefing overlap the protected sleep window. If the
+    // personal briefing starts before the normal leave-for-report time, it becomes
+    // the earlier commitment that determines when preparation must begin.
+    const usesBriefing=Boolean(briefing && briefing.start<reportReady);
+    const firstCommitment=usesBriefing ? briefing.start : reportReady;
+    const wake=new Date(firstCommitment.getTime()-minMs(prep));
+    const start=new Date(wake.getTime()-ms(state.rules.sleepHours));
+    return {
+      start,
+      end:wake,
+      quietStart:new Date(start.getTime()-minMs(state.rules.quietLead)),
+      prep,
+      firstCommitment,
+      firstCommitmentKind:usesBriefing?'briefing':'report-departure',
+      briefingAt:briefing?.start||null,
+      reportReady
+    };
+  };
+
+  allDerived=function(){
+    const sig=derivedStateSignature();
+    if(derivedCacheValue && sig===derivedCacheSignature) return derivedCacheValue;
+    const events=[];
+    state.people.forEach((p,pi)=>dedupeDuties(p.duties).forEach(d=>{
+      if(d.kind==='duty'){
+        events.push({kind:'duty',person:pi,start:new Date(d.checkIn),end:d.checkout?new Date(d.checkout):new Date(new Date(d.checkIn).getTime()+ms(8)),label:dutyLabel(d),raw:d});
+        const b=briefingForDuty(d,pi);
+        if(b) events.push({kind:'briefing',person:pi,start:b.start,end:b.end,label:'Briefing',lead:b.lead,flight:b.flight,departure:b.departure,briefingAt:b.briefingAt,checkIn:b.checkIn,insideDuty:b.insideDuty,raw:d});
+        const s=sleepForDuty(d,pi);
+        if(s){
+          events.push({
+            kind:'sleep',
+            person:pi,
+            start:s.start,
+            end:s.end,
+            label:`Sueño ${state.rules.sleepHours} h`,
+            prep:s.prep,
+            firstCommitment:s.firstCommitment,
+            firstCommitmentKind:s.firstCommitmentKind,
+            briefingAt:s.briefingAt,
+            reportReady:s.reportReady,
+            raw:d
+          });
+          if(state.rules.quietLead>0) events.push({kind:'quiet',person:pi,start:s.quietStart,end:s.start,label:'Quiet hours',raw:d});
+        }
+        const r=recoveryForDuty(d);
+        if(r) events.push({kind:'recovery',person:pi,start:r.start,end:r.end,label:r.level==='full'?'Recovery completo':'Recovery parcial',level:r.level,reasons:r.reasons,score:r.score,raw:d});
+      }
+    }));
+    const dutyEvents=events.filter(x=>x.kind==='duty');
+    for(const sleep of events.filter(x=>x.kind==='sleep')){
+      const conflicts=dutyEvents.filter(d=>d.person===sleep.person && new Date(d.start)<new Date(sleep.end) && new Date(d.end)>new Date(sleep.start));
+      if(conflicts.length){ sleep.sleepConflict=true; sleep.conflictDuties=conflicts.map(x=>x.raw?.route||x.label||'Duty'); }
+    }
+    const seen=new Map();
+    for(const e of events){
+      const k=[e.kind,e.person,e.start?.toISOString?.()||'',e.end?.toISOString?.()||'',e.raw?.route||'',e.label||''].join('|');
+      seen.set(k,e);
+    }
+    derivedCacheSignature=sig;
+    derivedCacheValue=[...seen.values()];
+    summaryCacheSignature=''; summaryCacheValue=null;
+    return derivedCacheValue;
+  };
+
+  function operationalStatusOnDay(key){
+    const busy=new Set(['STBY','RES','SIM','TRG']);
+    return state.people.some(p=>(p.duties||[]).some(d=>d.kind==='status'&&d.date===key&&busy.has(String(d.status||'').toUpperCase())));
+  }
+  function sharedFreeIntervalsForDay(key,derived,minMinutes=0){
+    if(!state.people[0].duties.length || !state.people[1].duties.length) return [];
+    // Until timed STBY/RES parsing is added, be conservative on these days.
+    if(operationalStatusOnDay(key)) return [];
+    const start=utcForLocalDayTime(key,'08:00'),end=utcForLocalDayTime(key,'23:00');
+    const busyKinds=new Set(['duty','sleep','briefing']);
+    // Recovery means the person is available at home for couple-planning purposes.
+    // It remains a visible overlay, but it must not remove time from shared availability.
+    const blocks=derived.filter(e=>busyKinds.has(e.kind)).map(e=>overlap(e,{start,end},start,end)).filter(Boolean);
+    const merged=mergeIntervals(blocks),gaps=[]; let cursor=start;
+    for(const b of merged){
+      if(b.start>cursor) gaps.push({start:new Date(cursor),end:new Date(b.start)});
+      if(b.end>cursor) cursor=b.end;
+    }
+    if(cursor<end) gaps.push({start:new Date(cursor),end:new Date(end)});
+    return gaps.filter(g=>(g.end-g.start)>=minMs(minMinutes));
+  }
+  coupleWindowForDay=function(key,derived){
+    let cache=coupleWindowCache.get(derived); if(!cache){cache=new Map();coupleWindowCache.set(derived,cache);} if(cache.has(key))return cache.get(key);
+    const gaps=sharedFreeIntervalsForDay(key,derived,120),result=gaps.sort((a,b)=>(b.end-b.start)-(a.end-a.start))[0]||null;
+    cache.set(key,result); return result;
+  };
+  function recoveryOverlaysForInterval(interval,derived){
+    if(!interval) return [];
+    return derived.filter(e=>e.kind==='recovery' && new Date(e.start)<new Date(interval.end) && new Date(e.end)>new Date(interval.start)).map(e=>{
+      const start=new Date(Math.max(+new Date(e.start),+new Date(interval.start)));
+      const end=new Date(Math.min(+new Date(e.end),+new Date(interval.end)));
+      return {...e,overlapStart:start,overlapEnd:end,overlapHours:(end-start)/3600000};
+    }).filter(e=>e.overlapHours>0);
+  }
+  function recoveryOverlayLabel(interval,derived){
+    const recs=recoveryOverlaysForInterval(interval,derived);
+    if(!recs.length) return '';
+    const names=[...new Set(recs.map(r=>state.people[r.person]?.name||`Perfil ${r.person+1}`))];
+    const hasFull=recs.some(r=>r.level==='full'),hasPartial=recs.some(r=>r.level==='partial');
+    const type=hasFull&&hasPartial?'recovery parcial/completo':hasFull?'recovery completo':'recovery parcial';
+    return `Incluye ${type} de ${names.join(' y ')}`;
+  }
+  function dayPlanStatus(key,derived){
+    let cache=dayStatusCache.get(derived); if(!cache){cache=new Map();dayStatusCache.set(derived,cache);} if(cache.has(key))return cache.get(key);
+    let result;
+    if(!state.people[0].duties.length || !state.people[1].duties.length) result={level:'unknown',label:'Falta un roster',emoji:'＋',detail:'Importa los dos rosters para comparar el día.',best:null,totalHours:0};
+    else{
+      const gaps=sharedFreeIntervalsForDay(key,derived,30),sorted=[...gaps].sort((a,b)=>(b.end-b.start)-(a.end-a.start)),best=sorted[0]||null;
+      const bestH=best?(best.end-best.start)/3600000:0,totalHours=gaps.reduce((sum,g)=>sum+(g.end-g.start)/3600000,0),recoveryOverlays=best?recoveryOverlaysForInterval(best,derived):[];
+      if(bestH>=6) result={level:'together',label:'Día para pasar juntos',emoji:'❤️',detail:`Mejor ventana ${timeLocal(best.start)}–${timeLocal(best.end)}`,best,totalHours,recoveryOverlays};
+      else if(bestH>=2) result={level:'partial',label:'Coincidimos un rato',emoji:'🫶',detail:`Mejor ventana ${timeLocal(best.start)}–${timeLocal(best.end)}`,best,totalHours,recoveryOverlays};
+      else result={level:'busy',label:'Día ocupado',emoji:'🔒',detail:operationalStatusOnDay(key)?'Hay standby/reserva u otra actividad que condiciona el día.':'No aparece una ventana continua de 2 h para los dos.',best,totalHours,recoveryOverlays:[]};
+    }
+    cache.set(key,result); return result;
+  }
+  function mealWindowForDay(key,time,derived){
+    let cache=mealCache.get(derived); if(!cache){cache=new Map();mealCache.set(derived,cache);} const ck=`${key}|${time}`; if(cache.has(ck))return cache.get(ck);
+    let result=null;
+    if(state.people[0].duties.length && state.people[1].duties.length && !operationalStatusOnDay(key)){
+      const center=utcForLocalDayTime(key,time),flex=minMs(state.rules.mealFlex),start=new Date(center.getTime()-flex),end=new Date(center.getTime()+flex);
+      const busyKinds=new Set(['duty','sleep','briefing']);
+      // A recovery block does not make lunch/dinner incompatible by itself: the
+      // person is at home, although recovery still has priority and stays visible.
+      const blocks=mergeIntervals(derived.filter(e=>busyKinds.has(e.kind)).map(e=>overlap(e,{start,end},start,end)).filter(Boolean));
+      let cursor=start;
+      for(const b of blocks){
+        if(b.start-cursor>=minMs(60)){result={start:new Date(cursor),end:new Date(cursor.getTime()+minMs(60))};break;}
+        if(b.end>cursor)cursor=b.end;
+      }
+      if(!result && end-cursor>=minMs(60))result={start:new Date(cursor),end:new Date(cursor.getTime()+minMs(60))};
+    }
+    cache.set(ck,result); return result;
+  }
+
+
+  eventsForDay=function(key,derived,includeQuiet=true){
+    let cache=eventsDayCache.get(derived); if(!cache){cache=new Map();eventsDayCache.set(derived,cache);} const ck=`${key}|${includeQuiet?'q':'nq'}`; if(cache.has(ck))return cache.get(ck);
+    const out=[];
+    state.people.forEach((p,pi)=>p.duties.filter(x=>x.kind==='status'&&x.date===key).forEach(x=>out.push({kind:'status',person:pi,label:x.status,raw:x,date:key})));
+    derived.filter(e=>eventOverlapsDay(e,key)&&(includeQuiet||e.kind!=='quiet')).forEach(e=>out.push(e));
+    const cw=coupleWindowForDay(key,derived); if(cw)out.push({kind:'couple',person:null,start:cw.start,end:cw.end,label:'Ventana juntos',date:key,recoveryOverlays:recoveryOverlaysForInterval(cw,derived)});
+    const order={status:0,quiet:1,sleep:2,briefing:3,duty:4,recovery:5,couple:6};
+    out.sort((a,b)=>{const ta=a.start?+new Date(a.start):-Infinity,tb=b.start?+new Date(b.start):-Infinity;return ta!==tb?ta-tb:(order[a.kind]??9)-(order[b.kind]??9);});
+    cache.set(ck,out); return out;
+  };
+
+
+  const baseEventClass=eventClass,baseEventBlockTitle=eventBlockTitle,baseEventBlockMeta=eventBlockMeta,baseEventTitle=eventTitle,baseEventSubtitle=eventSubtitle,baseEventKicker=eventKicker,baseEventDetailHtml=eventDetailHtml;
+  eventClass=function(e){ return e.kind==='briefing'?'briefing':baseEventClass(e); };
+  eventBlockTitle=function(e,compact=false){
+    if(e.kind!=='briefing') return baseEventBlockTitle(e,compact);
+    const p=state.people[e.person].name,initial=p.trim().charAt(0).toUpperCase();
+    return compact?`🗂 ${initial}`:`🗂 Briefing · ${p}`;
+  };
+  eventBlockMeta=function(e){ return e.kind==='briefing'?`${timeLocal(e.briefingAt||e.start)} · vuelo ${timeLocal(e.departure)} · −${e.lead} min`:baseEventBlockMeta(e); };
+  eventTitle=function(e){ return e.kind==='briefing'?`🗂 Briefing · ${state.people[e.person].name}`:baseEventTitle(e); };
+  eventSubtitle=function(e){
+    if(e.kind==='briefing') return `${e.lead} min antes de chocks del primer vuelo`;
+    if(e.kind==='sleep'){
+      const prep=numericPersonRule('prepMinutes',e.person,0);
+      return e.sleepConflict?'Coincide realmente con un duty · revisar roster':`${state.rules.sleepHours} h · ${prep} min de preparación personal`;
+    }
+    return baseEventSubtitle(e);
+  };
+  eventKicker=function(e){ return e.kind==='briefing'?'Briefing':baseEventKicker(e); };
+  eventDetailHtml=function(e){
+    if(e.kind==='briefing'){
+      const f=e.flight||{},sector=f.dep&&f.arr?`${f.dep} → ${f.arr}`:(e.raw?.route||'Primer sector');
+      const sourceBasis=e.raw?.timeBasis==='utc'?'UTC':'hora local del aeropuerto';
+      const warning=e.insideDuty?`<div class="warning-box"><b>⚠️ Briefing posterior al C/I</b><br>Con esta antelación, la hora calculada de briefing cae dentro del duty. Revisa el valor configurado si no es lo que buscas.</div>`:'';
+      return `${warning}<div class="detail-section detail-summary"><h3>En pocas palabras</h3>${detailRow('Persona',state.people[e.person].name)}${detailRow('Sector',sector)}${detailRow('Hora de briefing',localDateTime(e.briefingAt||e.start))}${detailRow('Salida primer vuelo (chocks)',localDateTime(e.departure))}${detailRow('C/I CrewLink',localDateTime(e.checkIn||e.raw?.checkIn))}${detailRow('Antelación configurada',`${e.lead} min`)}${detailRow('Base horaria del roster',sourceBasis)}</div><p class="detail-note">La hora de briefing se calcula siempre desde la salida del primer vuelo: <b>chocks − antelación configurada</b>. No se calcula desde el C/I.</p>`;
+    }
+    if(e.kind==='sleep'){
+      const report=e.raw?.checkIn?localDateTime(e.raw.checkIn):'—',
+        prep=numericPersonRule('prepMinutes',e.person,0),
+        firstKind=e.firstCommitmentKind==='briefing'?'Briefing':'Salida hacia el report',
+        firstAt=e.firstCommitment?localDateTime(e.firstCommitment):'—',
+        reportReady=e.reportReady?localDateTime(e.reportReady):'—',
+        warning=e.sleepConflict?`<div class="warning-box"><b>⚠️ Conflicto real detectado</b><br>Este bloque de sueño se solapa temporalmente con ${esc((e.conflictDuties||[]).join(', ')||'un duty')}. Revisa la importación o las reglas.</div>`:'';

@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-test('v0.9.2 Together UI exposes concise metrics and overlay sheet',()=>{
+import {readEnhancementsSource} from './_enhancements-source.mjs';
+test('v0.9.4 Together UI exposes concise metrics and overlay sheet',()=>{
   const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
-  const js=fs.readFileSync(new URL('../enhancements.js',import.meta.url),'utf8');
+  const js=readEnhancementsSource();
   const css=fs.readFileSync(new URL('../styles.css',import.meta.url),'utf8');
 
   assert.match(html,/data-view="summaryView">Juntos</);
@@ -23,7 +24,7 @@ test('v0.9.2 Together UI exposes concise metrics and overlay sheet',()=>{
 });
 
 test('date night requires verified next-day coverage and is local-time based',()=>{
-  const js=fs.readFileSync(new URL('../enhancements.js',import.meta.url),'utf8');
+  const js=readEnhancementsSource();
   assert.match(js,/rhCoveredPair\(key,true\)/);
   assert.match(js,/utcForLocalDayTime\(key,'19:00'\)/);
   assert.match(js,/utcForLocalDayTime\(next,state\.rules\.dateNightUntil/);

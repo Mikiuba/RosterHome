@@ -1,4 +1,4 @@
-/* RosterHome v0.9.2 — Hybrid CrewLink import.
+/* RosterHome v0.9.4 — Hybrid CrewLink import.
  * Desktop Chrome: uses the local RosterHome Bridge when present.
  * iPhone/Safari or any browser without the extension: uses a temporary Cloudflare Browser Run session.
  */

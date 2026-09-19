@@ -1,4 +1,4 @@
-/* RosterHome v0.9.2 · resilient durable local storage */
+/* RosterHome v0.9.4 · resilient durable local storage */
 (function(){
   const DB_NAME='rosterhome-db';
   const DB_VERSION=1;
@@ -95,7 +95,7 @@
       app:'RosterHome',
       format:'rosterhome-backup',
       backupVersion:1,
-      appVersion:'0.9.2',
+      appVersion:'0.9.4',
       exportedAt:new Date().toISOString(),
       state:JSON.parse(JSON.stringify(state))
     };

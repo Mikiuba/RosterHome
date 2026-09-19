@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-test('v0.9.2 precaches the app shell for offline use',()=>{
+import {readEnhancementsSource} from './_enhancements-source.mjs';
+test('v0.9.4 precaches the app shell for offline use',()=>{
   const sw=fs.readFileSync(new URL('../service-worker.js',import.meta.url),'utf8');
   for(const asset of ['./index.html','./styles.css','./storage.js','./roster-parser.js','./ftl-engine.js','./app.js','./enhancements.js','./crewlink-sync.js']){
     assert.match(sw,new RegExp(asset.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
@@ -14,7 +15,7 @@ test('v0.9.2 precaches the app shell for offline use',()=>{
 
 test('offline UI and FTL month spacing are explicit',()=>{
   const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
-  const js=fs.readFileSync(new URL('../enhancements.js',import.meta.url),'utf8');
+  const js=readEnhancementsSource();
   const crew=fs.readFileSync(new URL('../crewlink-sync.js',import.meta.url),'utf8');
   const css=fs.readFileSync(new URL('../styles.css',import.meta.url),'utf8');
 

@@ -1,0 +1,191 @@
+      {id:'togetherHours',icon:'🕒',label:'Horas juntos',value:ready?`${Math.round(togetherHours)} h`:'—',tone:'blue',description:'Tiempo potencial compartido entre 08:00 y 23:00. Recovery puede contar como tiempo en casa y se señala cuando corresponde.',items:b.hours},
+      {id:'mornings',icon:'☀️',label:'Mañanas juntos',value:ready?b.mornings.length:'—',tone:'sun',description:'Mañanas con al menos 3 horas seguidas disponibles para los dos entre 08:00 y 12:00.',items:b.mornings},
+      {id:'dinners',icon:'🍽️',label:'Cenas juntos',value:ready?b.dinners.length:'—',tone:'dinner',description:`Una hora compatible alrededor de vuestra cena preferida (${state.rules.dinnerTime}).`,items:b.dinners},
+      {id:'sleepTogether',icon:'🛌',label:'Dormir juntos',value:ready?b.sleepTogether.length:'—',tone:'sleep',description:'Noches en las que ningún duty, briefing o actividad operativa rompe la franja 23:00–07:00.',items:b.sleepTogether},
+      {id:'fullDays',icon:'🏖️',label:'Días completos',value:ready?b.fullDays.length:'—',tone:'beach',description:'Días en los que tenéis libre de forma continua la franja 09:00–21:00.',items:b.fullDays},
+      {id:'getaways',icon:'🧳',label:'Escapadas',value:ready?b.getaways.length:'—',tone:'trip',description:'Ventanas desde las 15:00 hasta las 12:00 del día siguiente sin obligaciones operativas. Recovery se conserva como aviso.',items:b.getaways},
+      {id:'difficult',icon:'⚠️',label:'A coordinar',value:ready?b.difficult.length:'—',tone:'warn',description:'EARLY, NIGHT, duties muy largos, standby/reserva, recovery o conflictos que conviene tener presentes antes de hacer planes.',items:b.difficult},
+      {id:'workload',icon:'⚖️',label:'Carga del mes',value:ready?workload.total:'—',tone:'load',description:'Comparación sencilla de la carga operativa de ambos, separada de las estadísticas de pareja.',items:[],workload}
+    ]};
+  }
+  function rhOpenSummarySheet(metric){
+    const sheet=$('summarySheet');if(!sheet)return;
+    $('summarySheetKicker').textContent='JUNTOS · '+monthLabel(state.month).toUpperCase();
+    $('summarySheetTitle').textContent=`${metric.icon} ${metric.label}`;
+    $('summarySheetSubtitle').textContent=metric.description;
+    const body=$('summarySheetBody');
+    if(metric.id==='workload'){
+      body.innerHTML=metric.workload.rows.map((r,pi)=>`<div class="together-workload p${pi}"><div class="together-workload-name">${esc(r.name)}</div><div class="together-workload-grid"><div><span>Duties</span><b>${r.duties}</b></div><div><span>Duty time</span><b>${r.hours.toFixed(1)} h</b></div><div><span>EARLY</span><b>${r.early}</b></div><div><span>LATE</span><b>${r.late}</b></div><div><span>NIGHT</span><b>${r.nights}</b></div><div><span>Recovery</span><b>${r.recoveries}</b></div></div></div>`).join('');
+    }else if(!metric.items.length){
+      body.innerHTML=`<div class="together-empty"><span>${metric.icon}</span><b>${metric.value==='—'?'Importa ambos rosters':'Nada por aquí este mes'}</b><p>${metric.value==='—'?'Cuando estén los dos rosters, RosterHome calculará este apartado automáticamente.':'No hay fechas que cumplan esta condición con los rosters actuales.'}</p></div>`;
+    }else{
+      body.innerHTML=metric.items.map(i=>`<button type="button" class="together-detail-row" data-together-day="${i.key}"><span class="together-detail-date">${esc(localDayLabel(i.key,{weekday:'short',day:'numeric',month:'short'}))}</span><span class="together-detail-copy"><b>${esc(i.text)}</b>${i.sub?`<small>${esc(i.sub)}</small>`:''}</span><i>›</i></button>`).join('');
+    }
+    sheet.classList.remove('hidden');sheet.setAttribute('aria-hidden','false');document.body.classList.add('modal-open');
+  }
+  function rhCloseSummarySheet(){
+    const sheet=$('summarySheet');if(!sheet)return;
+    sheet.classList.add('hidden');sheet.setAttribute('aria-hidden','true');
+    if($('eventModal')?.classList.contains('hidden'))document.body.classList.remove('modal-open');
+  }
+
+  renderSummary=function(){
+    const model=rhTogetherSummaryModel(),names=state.people.map(p=>p.name||'Perfil').join(' + ');
+    if($('togetherTitle'))$('togetherTitle').textContent=`💜 ${names}`;
+    if($('togetherMonth'))$('togetherMonth').textContent=monthLabel(state.month);
+    if($('togetherSubtitle'))$('togetherSubtitle').textContent=model.ready
+      ?'Cuándo podéis hacer planes de verdad, descansar juntos y saber de un vistazo qué días merece la pena proteger.'
+      :'Importa los dos rosters y RosterHome convertirá los horarios en planes fáciles de entender.';
+    if($('stats'))$('stats').innerHTML=model.metrics.map(m=>`<button type="button" class="together-stat tone-${m.tone}" data-together-metric="${m.id}"><span class="together-stat-icon">${m.icon}</span><span class="together-stat-value">${esc(m.value)}</span><span class="together-stat-label">${esc(m.label)}</span><small>${m.id==='workload'?'Ver comparación':'Ver fechas'}</small></button>`).join('');
+    window.__rhTogetherMetrics=model.metrics;
+  };
+
+  $('stats')?.addEventListener('click',e=>{
+    const b=e.target.closest('[data-together-metric]');if(!b)return;
+    e.preventDefault();e.stopImmediatePropagation();
+    const metric=(window.__rhTogetherMetrics||[]).find(m=>m.id===b.dataset.togetherMetric);
+    if(metric)rhOpenSummarySheet(metric);
+  },true);
+  $('summarySheet')?.addEventListener('click',e=>{
+    if(e.target.closest('[data-close-summary-sheet]')){rhCloseSummarySheet();return;}
+    const d=e.target.closest('[data-together-day]');
+    if(d){
+      rhCloseSummarySheet();
+      openDay(d.dataset.togetherDay);
+      document.querySelector('.tab[data-view="calendarView"]')?.click();
+    }
+  });
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('summarySheet')?.classList.contains('hidden'))rhCloseSummarySheet();});
+
+
+  /* =========================================================
+     v0.9.4 · Mobile calendar polish
+     ========================================================= */
+  function rhAvailableMonths(){
+    const set=new Set([state.month]);
+    state.people.forEach(p=>{
+      (p.duties||[]).forEach(d=>{
+        const key=String(d.date||d.sourceCheckInDate||'');
+        if(/^\d{4}-\d{2}/.test(key))set.add(key.slice(0,7));
+      });
+      (p.coverage||[]).forEach(c=>{
+        if(/^\d{4}-\d{2}/.test(String(c.start||'')))set.add(String(c.start).slice(0,7));
+        if(/^\d{4}-\d{2}/.test(String(c.end||'')))set.add(String(c.end).slice(0,7));
+      });
+    });
+    return [...set].sort();
+  }
+  function rhPopulateTogetherMonthSelect(){
+    const sel=$('togetherMonthSelect'); if(!sel)return;
+    const months=rhAvailableMonths();
+    sel.innerHTML=months.map(m=>`<option value="${m}" ${m===state.month?'selected':''}>${esc(monthLabel(m))}</option>`).join('');
+  }
+  $('togetherMonthSelect')?.addEventListener('change',()=>{
+    const val=$('togetherMonthSelect').value;
+    if(!/^\d{4}-\d{2}$/.test(val))return;
+    state.month=val;
+    state.focusDate=`${val}-01`;
+    saveState();
+    try{queueCalendarRender();}catch(_){}
+    renderSummary();
+  });
+
+  function rhOpenMobileDaySheet(key){
+    if(!matchMedia('(max-width:560px)').matches || state.calendarMode!=='month' || state.calendarDensity!=='simple'){
+      openDay(key); return;
+    }
+    const derived=allDerived(),s=dayPlanStatus(key,derived),sheet=$('mobileDaySheet');
+    if(!sheet)return;
+    const dinner=mealWindowForDay(key,state.rules.dinnerTime,derived);
+    const sleep=rhSleepTogether?rhSleepTogether(key,derived):null;
+    const rec=s.recoveryOverlays?.length?recoveryOverlayLabel(s.best,derived):'';
+    $('mobileDayTitle').textContent=localDayLabel(key,{weekday:'long',day:'numeric',month:'long'});
+    $('mobileDaySubtitle').textContent=s.detail||'';
+    $('mobileDayBody').innerHTML=`
+      <div class="mobile-day-hero ${s.level}">
+        <span class="mobile-day-hero-icon">${s.emoji}</span>
+        <div><b>${esc(s.label)}</b>${s.best?`<small>${esc(timeLocal(s.best.start))}–${esc(timeLocal(s.best.end))}</small>`:''}</div>
+      </div>
+      ${rec?`<div class="mobile-day-note">↻ ${esc(rec)}</div>`:''}
+      <div class="mobile-day-grid">
+        <div><span>Tiempo potencial</span><b>${s.totalHours?`${s.totalHours.toFixed(1)} h`:'—'}</b></div>
+        <div><span>Cena juntos</span><b>${dinner?'Sí':'No'}</b></div>
+        <div><span>Dormir juntos</span><b>${sleep?'Sí':'No'}</b></div>
+      </div>
+      <button class="btn primary mobile-day-open-full" type="button" data-open-full-day="${key}">Ver día completo</button>
+    `;
+    sheet.classList.remove('hidden');sheet.setAttribute('aria-hidden','false');document.body.classList.add('modal-open');
+  }
+  function rhCloseMobileDaySheet(){
+    const sheet=$('mobileDaySheet');if(!sheet)return;
+    sheet.classList.add('hidden');sheet.setAttribute('aria-hidden','true');
+    if($('eventModal')?.classList.contains('hidden')&&$('summarySheet')?.classList.contains('hidden'))document.body.classList.remove('modal-open');
+  }
+  $('calendar')?.addEventListener('click',e=>{
+    const day=e.target.closest('[data-mobile-day],[data-open-day]');
+    if(!day)return;
+    if(matchMedia('(max-width:560px)').matches && state.calendarMode==='month' && state.calendarDensity==='simple'){
+      e.preventDefault();e.stopImmediatePropagation();
+      rhOpenMobileDaySheet(day.dataset.mobileDay||day.dataset.openDay);
+    }
+  },true);
+  $('mobileDaySheet')?.addEventListener('click',e=>{
+    if(e.target.closest('[data-close-mobile-day]')){rhCloseMobileDaySheet();return;}
+    const full=e.target.closest('[data-open-full-day]');
+    if(full){
+      rhCloseMobileDaySheet();
+      openDay(full.dataset.openFullDay);
+    }
+  });
+
+  const baseTogetherRenderSummary=renderSummary;
+  renderSummary=function(){
+    baseTogetherRenderSummary();
+    rhPopulateTogetherMonthSelect();
+  };
+
+
+  /* =========================================================
+     v0.9.4 · Offline/PWA status
+     ========================================================= */
+  let rhWasOffline=!navigator.onLine;
+  function rhUpdateConnectivity(){
+    const badge=$('offlineBadge');
+    if(!badge)return;
+    if(!navigator.onLine){
+      badge.hidden=false;
+      badge.classList.remove('reconnected');
+      badge.textContent='📴 Sin conexión · datos guardados';
+      badge.title='Puedes consultar calendario, Juntos, FTL, reglas y rosters guardados. Para importar desde CrewLink necesitas internet.';
+      rhWasOffline=true;
+      document.documentElement.dataset.connectivity='offline';
+    }else{
+      document.documentElement.dataset.connectivity='online';
+      if(rhWasOffline){
+        badge.hidden=false;
+        badge.classList.add('reconnected');
+        badge.textContent='✓ Conexión recuperada';
+        clearTimeout(window.__rhReconnectTimer);
+        window.__rhReconnectTimer=setTimeout(()=>{badge.hidden=true;badge.classList.remove('reconnected');},2600);
+      }else{
+        badge.hidden=true;
+      }
+      rhWasOffline=false;
+    }
+  }
+  window.addEventListener('online',rhUpdateConnectivity);
+  window.addEventListener('offline',rhUpdateConnectivity);
+  rhUpdateConnectivity();
+
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.ready.then(async registration=>{
+      try{
+        if(registration.active) document.documentElement.dataset.offlineReady='true';
+      }catch(_){}
+    }).catch(()=>{});
+  }
+
+
+
+
+})();
