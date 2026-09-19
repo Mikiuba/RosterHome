@@ -1,4 +1,4 @@
-# RosterHome v0.9.1 — iPhone Direct + Windows Bridge
+# RosterHome v0.9.2 — iPhone Direct + Windows Bridge
 
 Esta versión permite actualizar CrewLink directamente desde iPhone/Safari sin depender del PC.
 
@@ -126,3 +126,20 @@ Ahora la fecha se resuelve usando:
 
 La misma lógica se aplica a C/I, C/O, standby/simulador/posicionamiento y estados
 OFF/RES/etc.
+
+
+## v0.9.2 — calendarios operativos separados
+
+En `Reglas → Calendarios de iPhone` se puede seleccionar Miguel, Nicole o ambos y
+generar dos archivos independientes:
+
+- `RosterHome · Briefings`: un evento de 15 minutos a la hora exacta de briefing
+  calculada por RosterHome.
+- `RosterHome · Vuelos`: un evento por cada sector, desde off-block hasta on-block.
+
+No se exportan sueño, recovery, quiet hours ni periodos juntos.
+
+Los eventos usan UID estables y los calendarios incluyen `X-WR-CALNAME`, por lo
+que están preparados para mantenerse separados en Apple Calendar. En iPhone se
+usa la hoja de compartir cuando está disponible y, como fallback, se descarga
+el `.ics`.

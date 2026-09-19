@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="RosterHome" />
   <title>RosterHome</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=0.9.1" />
+  <link rel="stylesheet" href="styles.css?v=0.9.2" />
 </head>
 <body>
 <div class="app">
@@ -275,7 +275,31 @@
         <div><label>Cena preferida</label><input id="dinnerTime" type="time" value="20:30"></div>
         <div><label>Margen comida/cena (min)</label><input id="mealFlex" type="number" min="0" max="180" value="60"></div>
       </div>
-      <div class="actions"><button class="btn primary" id="saveRules">Guardar reglas</button><button class="btn" id="exportIcs">Exportar calendario HOME (.ics)</button></div>
+      <div class="actions"><button class="btn primary" id="saveRules">Guardar reglas</button></div>
+
+      <div class="calendar-export-card">
+        <div class="calendar-export-head">
+          <div>
+            <h3>📅 Calendarios de iPhone</h3>
+            <p class="muted">Exporta solo lo operativo. Briefings y vuelos van en archivos separados para que puedas tener dos calendarios independientes y elegir cuál mostrar en tus widgets.</p>
+          </div>
+        </div>
+        <div class="calendar-export-grid">
+          <div>
+            <label for="calendarExportPerson">Perfil a exportar</label>
+            <select id="calendarExportPerson">
+              <option value="0">Perfil 1</option>
+              <option value="1">Perfil 2</option>
+              <option value="both">Ambos perfiles</option>
+            </select>
+          </div>
+          <div class="calendar-export-actions">
+            <button class="btn" id="exportBriefingsIcs" type="button">Exportar Briefings (.ics)</button>
+            <button class="btn" id="exportFlightsIcs" type="button">Exportar Vuelos (.ics)</button>
+          </div>
+        </div>
+        <p class="rules-help muted">Los dos archivos llevan nombres de calendario distintos: <b>RosterHome · Briefings</b> y <b>RosterHome · Vuelos</b>. Sueño, recovery y tiempo juntos no se exportan.</p>
+      </div>
 
       <div class="storage-card" id="storageCard">
         <div class="storage-heading">
@@ -327,7 +351,7 @@
     </div>
   </section>
 
-  <div class="footer">RosterHome v0.9.1 · Together · Motor FTL OM-A core activo.</div>
+  <div class="footer">RosterHome v0.9.2 · Together · Motor FTL OM-A core activo.</div>
 </div>
 
 <div id="eventModal" class="modal hidden" aria-hidden="true">
@@ -378,13 +402,13 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="storage.js?v=0.9.1"></script>
-<script src="roster-parser.js?v=0.9.1"></script>
-<script src="roster-history.js?v=0.9.1"></script>
-<script src="ftl-engine.js?v=0.9.1"></script>
-<script src="app.js?v=0.9.1"></script>
-<script src="enhancements.js?v=0.9.1"></script>
-<script src="crewlink-changes.js?v=0.9.1"></script>
-<script src="crewlink-sync.js?v=0.9.1"></script>
+<script src="storage.js?v=0.9.2"></script>
+<script src="roster-parser.js?v=0.9.2"></script>
+<script src="roster-history.js?v=0.9.2"></script>
+<script src="ftl-engine.js?v=0.9.2"></script>
+<script src="app.js?v=0.9.2"></script>
+<script src="enhancements.js?v=0.9.2"></script>
+<script src="crewlink-changes.js?v=0.9.2"></script>
+<script src="crewlink-sync.js?v=0.9.2"></script>
 </body>
 </html>

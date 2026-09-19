@@ -732,3 +732,37 @@ html[data-connectivity="offline"] .cl-progress{
     margin-top:0!important;
   }
 }
+
+
+/* =========================================================
+   RosterHome v0.9.2 · Calendar export
+   ========================================================= */
+.calendar-export-card{
+  margin-top:16px;
+  padding:16px;
+  border:1px solid var(--line);
+  border-radius:16px;
+  background:linear-gradient(145deg,rgba(121,167,255,.045),rgba(183,153,255,.04));
+}
+.calendar-export-head h3{margin:0 0 4px;font-size:15px}
+.calendar-export-head p{margin:0 0 14px}
+.calendar-export-grid{
+  display:grid;
+  grid-template-columns:minmax(220px,.8fr) minmax(0,1.2fr);
+  gap:12px;
+  align-items:end;
+}
+.calendar-export-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.calendar-export-actions .btn{
+  flex:1 1 190px;
+}
+@media(max-width:560px){
+  .calendar-export-card{padding:14px}
+  .calendar-export-grid{grid-template-columns:1fr}
+  .calendar-export-actions{display:grid;grid-template-columns:1fr}
+  .calendar-export-actions .btn{width:100%}
+}
