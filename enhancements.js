@@ -495,7 +495,7 @@
   }
 
   /* =========================================================
-     RosterHome v0.9.1 · Together
+     RosterHome v0.9.2 · Together
      ========================================================= */
   function rhBothRostersReady(){
     return state.people.every(p=>(p.duties||[]).length>0);
@@ -725,7 +725,7 @@
 
 
   /* =========================================================
-     v0.9.1 · Mobile calendar polish
+     v0.9.2 · Mobile calendar polish
      ========================================================= */
   function rhAvailableMonths(){
     const set=new Set([state.month]);
@@ -812,7 +812,7 @@
 
 
   /* =========================================================
-     v0.9.1 · Offline/PWA status
+     v0.9.2 · Offline/PWA status
      ========================================================= */
   let rhWasOffline=!navigator.onLine;
   function rhUpdateConnectivity(){
@@ -850,5 +850,175 @@
       }catch(_){}
     }).catch(()=>{});
   }
+
+
+  /* =========================================================
+     v0.9.2 · Exportación operativa a Apple Calendar
+     ========================================================= */
+  function rhIcsEscape(value){
+    return String(value??'').replace(/\\/g,'\\\\').replace(/\r?\n/g,'\\n').replace(/,/g,'\\,').replace(/;/g,'\\;');
+  }
+  function rhIcsStamp(value){
+    return new Date(value).toISOString().replace(/[-:]/g,'').replace(/\.\d{3}/,'');
+  }
+  function rhIcsUid(parts){
+    return parts.map(x=>String(x??'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')).filter(Boolean).join('.')+'@rosterhome.local';
+  }
+  function rhAddUtcDays(date,days){
+    return new Date(date.getTime()+Number(days||0)*86400000);
+  }
+  function rhDatePartsUtc(date){
+    return {y:date.getUTCFullYear(),m:date.getUTCMonth()+1,d:date.getUTCDate()};
+  }
+  function rhTimeParts(hhmm){
+    const s=String(hhmm||'').padStart(4,'0');
+    return {h:Number(s.slice(0,2)),min:Number(s.slice(2,4))};
+  }
+  function rhWallInstant(date,hhmm,timeZone){
+    const dp=rhDatePartsUtc(date),tp=rhTimeParts(hhmm);
+    return timeZone==='UTC'
+      ? new Date(Date.UTC(dp.y,dp.m-1,dp.d,tp.h,tp.min,0))
+      : zonedToUtc(dp.y,dp.m,dp.d,tp.h,tp.min,timeZone);
+  }
+  function rhFlightInstants(duty){
+    if(duty?.kind!=='duty'||duty.serviceType!=='flight'||!(duty.flights||[]).length)return [];
+    const baseKey=duty.sourceCheckInDate||duty.date;
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(String(baseKey||'')))return [];
+    const baseDate=new Date(`${baseKey}T00:00:00Z`);
+    let previousEnd=null;
+    const out=[];
+    for(const flight of duty.flights){
+      let depDate=rhAddUtcDays(baseDate,flight.depDayOffset||0);
+      let arrDate=rhAddUtcDays(baseDate,flight.arrDayOffset||0);
+      const depZone=duty.timeBasis==='local_event'?(RosterParser?.airportTimeZone?.(flight.dep)||'UTC'):'UTC';
+      const arrZone=duty.timeBasis==='local_event'?(RosterParser?.airportTimeZone?.(flight.arr)||'UTC'):'UTC';
+      let start=rhWallInstant(depDate,flight.depTime,depZone);
+      while(previousEnd&&start<previousEnd){
+        depDate=rhAddUtcDays(depDate,1);
+        start=rhWallInstant(depDate,flight.depTime,depZone);
+      }
+      let end=rhWallInstant(arrDate,flight.arrTime,arrZone);
+      while(end<=start){
+        arrDate=rhAddUtcDays(arrDate,1);
+        end=rhWallInstant(arrDate,flight.arrTime,arrZone);
+      }
+      out.push({flight,start,end});
+      previousEnd=end;
+    }
+    return out;
+  }
+  function rhSelectedExportPeople(){
+    const value=$('calendarExportPerson')?.value??'0';
+    if(value==='both')return [0,1];
+    const n=Number(value);
+    return Number.isInteger(n)&&n>=0&&n<state.people.length?[n]:[0];
+  }
+  function rhCalendarTitle(kind,people){
+    const base=kind==='briefing'?'RosterHome · Briefings':'RosterHome · Vuelos';
+    if(people.length!==1)return base;
+    const name=state.people[people[0]]?.name?.trim();
+    return name?`${base} · ${name}`:base;
+  }
+  function rhBuildCalendar(kind){
+    const people=rhSelectedExportPeople(),events=[];
+    if(kind==='briefing'){
+      const derived=allDerived();
+      derived.filter(e=>e.kind==='briefing'&&people.includes(e.person)).forEach(e=>{
+        const person=state.people[e.person]?.name||`Perfil ${e.person+1}`;
+        const route=e.raw?.route||[e.flight?.dep,e.flight?.arr].filter(Boolean).join('–')||'Duty';
+        const start=new Date(e.briefingAt||e.start);
+        const end=new Date(start.getTime()+15*60000);
+        events.push({
+          uid:rhIcsUid(['briefing',e.person,e.raw?.date||dayKey(start),route]),
+          start,end,
+          summary:`Briefing · ${route}`,
+          description:`${person} · briefing ${e.lead||''} min antes del primer vuelo${e.checkIn?` · C/I ${timeLocal(e.checkIn)}`:''}`.trim(),
+          location:e.raw?.base||e.flight?.dep||''
+        });
+      });
+    }else{
+      people.forEach(pi=>{
+        const person=state.people[pi]?.name||`Perfil ${pi+1}`;
+        dedupeDuties(state.people[pi]?.duties||[]).forEach(d=>{
+          rhFlightInstants(d).forEach(({flight,start,end})=>{
+            const flightNo=`${flight.carrier||''}${flight.number||''}`.trim();
+            events.push({
+              uid:rhIcsUid(['flight',pi,d.date,flightNo,flight.dep,flight.arr,rhIcsStamp(start)]),
+              start,end,
+              summary:`${flightNo||'Vuelo'} · ${flight.dep} → ${flight.arr}`,
+              description:`${person}${d.route?` · duty ${d.route}`:''}${flight.aircraft?` · ${flight.aircraft}`:''}`,
+              location:`${flight.dep} → ${flight.arr}`
+            });
+          });
+        });
+      });
+    }
+    events.sort((a,b)=>a.start-b.start);
+    return {title:rhCalendarTitle(kind,people),events};
+  }
+  function rhCalendarIcs({title,events}){
+    const now=rhIcsStamp(new Date());
+    const lines=[
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//RosterHome//Operational Calendar//ES',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      `X-WR-CALNAME:${rhIcsEscape(title)}`,
+      'X-WR-TIMEZONE:UTC'
+    ];
+    events.forEach(e=>{
+      lines.push(
+        'BEGIN:VEVENT',
+        `UID:${e.uid}`,
+        `DTSTAMP:${now}`,
+        `DTSTART:${rhIcsStamp(e.start)}`,
+        `DTEND:${rhIcsStamp(e.end)}`,
+        `SUMMARY:${rhIcsEscape(e.summary)}`,
+        `DESCRIPTION:${rhIcsEscape(e.description||'')}`,
+        `LOCATION:${rhIcsEscape(e.location||'')}`,
+        'END:VEVENT'
+      );
+    });
+    lines.push('END:VCALENDAR');
+    return lines.join('\r\n')+'\r\n';
+  }
+  async function rhDeliverIcs(kind){
+    const calendar=rhBuildCalendar(kind);
+    if(!calendar.events.length){
+      alert(kind==='briefing'?'No hay briefings para el perfil seleccionado.':'No hay vuelos para el perfil seleccionado.');
+      return;
+    }
+    const text=rhCalendarIcs(calendar);
+    const safe=calendar.title.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'');
+    const file=new File([text],`${safe}.ics`,{type:'text/calendar;charset=utf-8'});
+    try{
+      if(navigator.canShare?.({files:[file]})&&navigator.share){
+        await navigator.share({files:[file],title:calendar.title});
+        return;
+      }
+    }catch(err){
+      if(err?.name==='AbortError')return;
+    }
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(file);
+    a.download=file.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+  }
+
+  function rhSyncCalendarExportNames(){
+    const s=$('calendarExportPerson');if(!s)return;
+    const n0=state.people[0]?.name||'Perfil 1',n1=state.people[1]?.name||'Perfil 2';
+    s.options[0].textContent=n0;
+    s.options[1].textContent=n1;
+    s.options[2].textContent=`${n0} + ${n1}`;
+  }
+  rhSyncCalendarExportNames();
+  ['name0','name1'].forEach(id=>$(id)?.addEventListener('input',()=>setTimeout(rhSyncCalendarExportNames,0)));
+  $('exportBriefingsIcs')?.addEventListener('click',()=>rhDeliverIcs('briefing'));
+  $('exportFlightsIcs')?.addEventListener('click',()=>rhDeliverIcs('flight'));
 
 })();
