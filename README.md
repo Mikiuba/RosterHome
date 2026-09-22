@@ -1,4 +1,4 @@
-# RosterHome v1.0.1 — iPhone Direct + Windows Bridge
+# RosterHome v1.1.0 — iPhone Direct + Windows Bridge
 
 Esta versión permite actualizar CrewLink directamente desde iPhone/Safari sin depender del PC.
 
@@ -203,3 +203,15 @@ con la URL-token no adivinable.
 - Se usa la configuración declarativa moderna de Cloudflare:
   `exports.CalendarStore = { type: "durable-object", storage: "sqlite" }`.
 - Se mantiene el binding `CALENDAR_STORE` para publicar y servir los feeds.
+
+
+## v1.1.0 — CrewLink Auto Sync diario
+
+- Cron Trigger diario de Cloudflare (`17 4 * * *`, UTC).
+- Cada perfil puede guardar su propia cuenta CrewLink para actualización autónoma.
+- Usuario y contraseña se cifran con AES-GCM antes de guardarse en Durable Objects; la clave deriva de `ROSTERHOME_ACCESS_KEY`.
+- El backend abre CrewLink con Browser Run, descarga el PDF, extrae el texto con PDF.js y ejecuta el mismo `roster-parser.js` de la app.
+- Solo un roster con cobertura/totales reconciliados sustituye al último válido. Si falla CrewLink, el roster anterior se conserva.
+- Los calendarios suscritos de Briefings/Vuelos se regeneran en el servidor cuando el perfil publicado se actualiza.
+- Al volver a abrir RosterHome, la app descarga el último roster automático y lo fusiona con el historial local.
+- Incluye botones `Activar y sincronizar ahora`, `Actualizar ahora` y `Desactivar`.

@@ -1,4 +1,4 @@
-/* RosterHome v1.0.1 · subscribed Apple calendars */
+/* RosterHome v1.1.0 · subscribed Apple calendars */
 (()=>{
   const $=id=>document.getElementById(id);
   const KEY_STORE='rosterhome_cloud_access_key';
@@ -78,7 +78,7 @@
       const r=await fetch('/api/calendar/publish',{
         method:'POST',
         headers:{'Content-Type':'application/json','X-RosterHome-Key':accessKey},
-        body:JSON.stringify({token:token(),briefings:feeds.briefings,flights:feeds.flights})
+        body:JSON.stringify({token:token(),profile:Number($('calendarExportPerson')?.value||0),briefings:feeds.briefings,flights:feeds.flights})
       });
       const body=await r.json().catch(()=>({}));
       if(!r.ok)throw Error(body.error||`HTTP ${r.status}`);

@@ -735,7 +735,7 @@ html[data-connectivity="offline"] .cl-progress{
 
 
 /* =========================================================
-   RosterHome v1.0.1 · Calendar export
+   RosterHome v1.1.0 · Calendar export
    ========================================================= */
 .calendar-export-card{
   margin-top:16px;
@@ -787,3 +787,10 @@ html[data-connectivity="offline"] .cl-progress{
   .calendar-subscription-actions{display:grid;grid-template-columns:1fr}
   .calendar-subscription-actions .btn{width:100%}
 }
+
+.auto-sync-card{margin-top:16px;padding:16px;border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.025)}
+.auto-sync-consent{margin-top:12px}
+.auto-sync-profiles{display:grid;gap:8px;margin-top:12px}
+.auto-sync-row{display:flex;justify-content:space-between;gap:14px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.02)}
+.auto-sync-row>div{display:flex;flex-direction:column;gap:2px}.auto-sync-row span,.auto-sync-row small{font-size:11px;color:var(--muted)}
+@media(max-width:620px){.auto-sync-row{display:grid}.auto-sync-grid{grid-template-columns:1fr!important}}

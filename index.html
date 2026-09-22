@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="RosterHome" />
   <title>RosterHome</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=1.0.1" />
+  <link rel="stylesheet" href="styles.css?v=1.1.0" />
 </head>
 <body>
 <div class="app">
@@ -306,6 +306,43 @@
         <p id="calendarExportStatus" class="calendar-export-status muted" role="status" aria-live="polite"></p>
       </div>
 
+      <div class="auto-sync-card" id="autoSyncCard">
+        <div class="calendar-export-head">
+          <div>
+            <h3>🔄 CrewLink Auto Sync</h3>
+            <p class="muted">Cloudflare comprueba CrewLink una vez al día aunque no abras RosterHome. Si hay cambios, guarda el roster nuevo y actualiza los calendarios suscritos.</p>
+          </div>
+          <span id="autoSyncBadge" class="storage-badge checking">Comprobando…</span>
+        </div>
+        <div class="calendar-export-grid auto-sync-grid">
+          <div>
+            <label for="autoSyncPerson">Perfil</label>
+            <select id="autoSyncPerson"><option value="0">Perfil 1</option><option value="1">Perfil 2</option></select>
+          </div>
+          <div>
+            <label for="autoSyncUser">Usuario CrewLink</label>
+            <input id="autoSyncUser" maxlength="16" autocomplete="username" autocapitalize="none" placeholder="MTR / ENJ">
+          </div>
+          <div>
+            <label for="autoSyncPassword">Contraseña CrewLink</label>
+            <input id="autoSyncPassword" type="password" maxlength="256" autocomplete="current-password" placeholder="Solo para activar o cambiar credenciales">
+          </div>
+          <div>
+            <label for="autoSyncKey">Clave privada de RosterHome</label>
+            <input id="autoSyncKey" type="password" maxlength="256" autocomplete="off" placeholder="ROSTERHOME_ACCESS_KEY">
+          </div>
+        </div>
+        <label class="crewlink-check auto-sync-consent"><input id="autoSyncHttp" type="checkbox"> Entiendo que Auto Sync accederá automáticamente al portal HTTP de CrewLink y que mis credenciales se guardarán cifradas en Cloudflare.</label>
+        <div class="calendar-subscription-actions">
+          <button class="btn primary" id="autoSyncEnable" type="button">Activar y sincronizar ahora</button>
+          <button class="btn" id="autoSyncRun" type="button" disabled>Actualizar ahora</button>
+          <button class="btn" id="autoSyncDisable" type="button" disabled>Desactivar</button>
+        </div>
+        <p class="rules-help muted">La contraseña no se guarda en el iPhone. En el servidor se cifra con AES-GCM usando la clave secreta de RosterHome. Si una actualización falla, se conserva el último roster válido.</p>
+        <div id="autoSyncProfiles" class="auto-sync-profiles"></div>
+        <p id="autoSyncStatus" class="calendar-export-status muted" role="status" aria-live="polite"></p>
+      </div>
+
       <div class="storage-card" id="storageCard">
         <div class="storage-heading">
           <div><h3>💾 Datos y persistencia</h3><p class="muted">El roster se guarda en IndexedDB y se conserva también una copia rápida local.</p></div>
@@ -356,7 +393,7 @@
     </div>
   </section>
 
-  <div class="footer">RosterHome v1.0.1 · Together · Motor FTL OM-A core activo.</div>
+  <div class="footer">RosterHome v1.1.0 · Together · Motor FTL OM-A core activo.</div>
 </div>
 
 <div id="eventModal" class="modal hidden" aria-hidden="true">
@@ -407,15 +444,16 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="storage.js?v=1.0.1"></script>
-<script src="roster-parser.js?v=1.0.1"></script>
-<script src="roster-history.js?v=1.0.1"></script>
-<script src="ftl-engine.js?v=1.0.1"></script>
-<script src="app.js?v=1.0.1"></script>
-<script src="enhancements.js?v=1.0.1"></script>
-<script src="calendar-export.js?v=1.0.1"></script>
-<script src="calendar-subscriptions.js?v=1.0.1"></script>
-<script src="crewlink-changes.js?v=1.0.1"></script>
-<script src="crewlink-sync.js?v=1.0.1"></script>
+<script src="storage.js?v=1.1.0"></script>
+<script src="roster-parser.js?v=1.1.0"></script>
+<script src="roster-history.js?v=1.1.0"></script>
+<script src="ftl-engine.js?v=1.1.0"></script>
+<script src="app.js?v=1.1.0"></script>
+<script src="enhancements.js?v=1.1.0"></script>
+<script src="calendar-export.js?v=1.1.0"></script>
+<script src="calendar-subscriptions.js?v=1.1.0"></script>
+<script src="auto-sync.js?v=1.1.0"></script>
+<script src="crewlink-changes.js?v=1.1.0"></script>
+<script src="crewlink-sync.js?v=1.1.0"></script>
 </body>
 </html>

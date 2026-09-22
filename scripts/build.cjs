@@ -2,7 +2,7 @@ const fs=require('node:fs'),path=require('node:path');
 const root=path.resolve(__dirname,'..'),out=path.join(root,'dist');
 fs.mkdirSync(out,{recursive:true});
 
-const files=['index.html','styles.css','app.js','storage.js','roster-parser.js','roster-history.js','ftl-engine.js','manifest.webmanifest','service-worker.js','crewlink-changes.js','crewlink-sync.js','calendar-export.js','calendar-subscriptions.js'];
+const files=['index.html','styles.css','app.js','storage.js','roster-parser.js','roster-history.js','ftl-engine.js','manifest.webmanifest','service-worker.js','crewlink-changes.js','crewlink-sync.js','calendar-export.js','calendar-subscriptions.js','auto-sync.js'];
 const allowed=new Set([...files,'enhancements.js']);
 
 for(const file of fs.readdirSync(out)){

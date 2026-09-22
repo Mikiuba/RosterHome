@@ -1,4 +1,4 @@
-const CACHE='rosterhome-v1.0.1';
+const CACHE='rosterhome-v1.1.0';
 const CORE=[
   './',
   './index.html',
@@ -12,6 +12,7 @@ const CORE=[
   './enhancements.js',
   './calendar-export.js',
   './calendar-subscriptions.js',
+  './auto-sync.js',
   './crewlink-changes.js',
   './crewlink-sync.js'
 ];
