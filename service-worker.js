@@ -1,4 +1,4 @@
-const CACHE='rosterhome-v1.1.0';
+const CACHE='rosterhome-v1.1.1';
 const CORE=[
   './',
   './index.html',
@@ -85,7 +85,7 @@ self.addEventListener('fetch',event=>{
   if(url.origin===self.location.origin && isStaticAsset(request,url)){
     event.respondWith((async()=>{
       const cache=await caches.open(CACHE);
-      const cached=await cache.match(request,{ignoreSearch:true});
+      const cached=await cache.match(request,{ignoreSearch:false});
       const refresh=fetch(request,{cache:'no-store'}).then(async response=>{
         if(response && response.ok) await cache.put(request,response.clone());
         return response;
@@ -111,7 +111,7 @@ self.addEventListener('fetch',event=>{
         if(fresh && fresh.ok) await cache.put(request,fresh.clone());
         return fresh;
       }catch(err){
-        const cached=await cache.match(request,{ignoreSearch:true});
+        const cached=await cache.match(request,{ignoreSearch:false});
         if(cached)return cached;
         throw err;
       }

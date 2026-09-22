@@ -1,4 +1,4 @@
-const VERSION='1.1.0';
+const VERSION='1.1.1';
 const START='http://crewlink.corendonairlines.com:8090/crewlink/crewlink.jsp?crewlinkOperation=crewlinkForCrew&resetSession=Y';
 const DUTY='http://crewlink.corendonairlines.com:8090/crewlink/clApp?crewlinkService=individualDutyPlan&crewlinkOperation=default&crewlinkSourcePage=spCrew';
 const ORIGIN='http://crewlink.corendonairlines.com:8090';
@@ -28,9 +28,10 @@ function validatePayload(payload){
 }
 function safeCrewlinkError(error){
   const message=String(error?.message||error||'No se pudo completar CrewLink.').replace(/\s+/g,' ').trim();
-  if(/timeout|timed out/i.test(message))return 'CrewLink tardó demasiado en responder. Vuelve a intentarlo.';
-  if(/429|browser time limit/i.test(message))return 'Se ha agotado el tiempo diario de navegador de Cloudflare. Prueba más tarde o usa el Bridge del PC.';
-  if(/Internal processing error/i.test(message))return 'CrewLink devolvió un error interno al generar el roster.';
+  if(/parser remoto|lector PDF|PDF de CrewLink/i.test(message)&&/timeout|timed out/i.test(message))return 'El procesamiento del PDF tardó demasiado. El roster guardado sigue intacto y Auto Sync volverá a intentarlo.';
+  if(/timeout|timed out/i.test(message))return 'CrewLink tardó demasiado en responder. El roster guardado sigue intacto y Auto Sync volverá a intentarlo.';
+  if(/429|browser time limit/i.test(message))return 'Se ha agotado el tiempo diario de navegador de Cloudflare. Auto Sync volverá a intentarlo en la siguiente ejecución.';
+  if(/Internal processing error/i.test(message))return 'CrewLink devolvió un error interno al generar el roster. Auto Sync volverá a intentarlo.';
   return message.slice(0,500);
 }
 
@@ -231,7 +232,7 @@ async function acquireCdp(env){
   const acquire=await env.BROWSER.fetch(`${host}/v1/devtools/browser?`,{method:'POST'});
   if(!acquire.ok)throw Error(`Cloudflare Browser Run respondió HTTP ${acquire.status}.`);
   const info=await acquire.json();if(!info?.sessionId)throw Error('Cloudflare no devolvió una sesión de navegador.');
-  const upgrade=await env.BROWSER.fetch(`${host}/v1/devtools/browser/${encodeURIComponent(info.sessionId)}`,{headers:{Upgrade:'websocket','cf-brapi-client':'RosterHome/1.1.0'}});
+  const upgrade=await env.BROWSER.fetch(`${host}/v1/devtools/browser/${encodeURIComponent(info.sessionId)}`,{headers:{Upgrade:'websocket','cf-brapi-client':'RosterHome/1.1.1'}});
   if(!upgrade.webSocket)throw Error(`No se pudo abrir el canal de control del navegador remoto (HTTP ${upgrade.status}).`);
   const ws=upgrade.webSocket;ws.accept();const cdp=new CdpClient(ws);
   const {targetId}=await cdp.send('Target.createTarget',{url:'about:blank'});
@@ -240,42 +241,46 @@ async function acquireCdp(env){
   await Promise.all([cdp.send('Page.enable',{},sessionId),cdp.send('Runtime.enable',{},sessionId),cdp.send('Network.enable',{},sessionId)]);
   return {cdp,sessionId};
 }
-async function navigate(cdp,sessionId,url,timeout=45000){
+async function navigate(cdp,sessionId,url,timeout=75000){
   const loaded=cdp.waitEvent('Page.loadEventFired',sessionId,timeout);const r=await cdp.send('Page.navigate',{url},sessionId,timeout);if(r.errorText)throw Error(`No se pudo abrir CrewLink: ${r.errorText}`);await loaded;
 }
-async function evaluate(cdp,sessionId,expression,timeout=30000){
+async function evaluate(cdp,sessionId,expression,timeout=45000){
   const r=await cdp.send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true,userGesture:true},sessionId,timeout);
   if(r.exceptionDetails)throw Error(r.exceptionDetails.text||r.exceptionDetails.exception?.description||'Error ejecutando CrewLink.');return r.result?.value;
 }
-async function submitAndWait(cdp,sessionId,expression,timeout=45000){
+async function submitAndWait(cdp,sessionId,expression,timeout=75000){
   const loaded=cdp.waitEvent('Page.loadEventFired',sessionId,timeout);const result=await evaluate(cdp,sessionId,expression,10000);if(!result?.ok){loaded.catch(()=>{});throw Error(result?.reason||'No se pudo enviar el formulario de CrewLink.');}await loaded;
 }
+async function submitWithoutLoadWait(cdp,sessionId,expression){
+  const result=await evaluate(cdp,sessionId,expression,15000);
+  if(!result?.ok)throw Error(result?.reason||'No se pudo enviar el formulario de CrewLink.');
+}
 async function browserProbe(env){
-  const {cdp,sessionId}=await acquireCdp(env);try{await navigate(cdp,sessionId,START,30000);const ok=await evaluate(cdp,sessionId,`!![...document.forms].find(f=>f.elements?.crewlinkPassword)`);if(!ok)throw Error('CrewLink abre, pero no reconozco su formulario de acceso.');return {message:'✓ Cloudflare abre CrewLink correctamente. No se han enviado credenciales.'};}finally{try{await cdp.send('Browser.close',{},null,3000);}catch{}cdp.close();}
+  const {cdp,sessionId}=await acquireCdp(env);try{await navigate(cdp,sessionId,START,60000);const ok=await evaluate(cdp,sessionId,`!![...document.forms].find(f=>f.elements?.crewlinkPassword)`);if(!ok)throw Error('CrewLink abre, pero no reconozco su formulario de acceso.');return {message:'✓ Cloudflare abre CrewLink correctamente. No se han enviado credenciales.'};}finally{try{await cdp.send('Browser.close',{},null,3000);}catch{}cdp.close();}
 }
 async function browserSync(env,payload,progress){
   validatePayload(payload);progress(8,'Iniciando navegador seguro en Cloudflare…');const {cdp,sessionId}=await acquireCdp(env);
   try{
-    progress(18,'Abriendo CrewLink…');await navigate(cdp,sessionId,START,30000);
+    progress(18,'Abriendo CrewLink…');await navigate(cdp,sessionId,START,60000);
     const loginForm=await evaluate(cdp,sessionId,`!![...document.forms].find(f=>f.elements?.crewlinkPassword)`);if(!loginForm)throw Error('CrewLink abre, pero no reconozco su formulario de acceso.');
     progress(32,'Iniciando sesión en CrewLink…');
     const loginExpr=`(()=>{const f=[...document.forms].find(x=>x.elements?.crewlinkPassword);if(!f)return {ok:false,reason:'No encuentro el formulario de acceso.'};const set=(n,v)=>{const e=f.elements[n];if(e)e.value=v;};set('crewlinkUserName',${JSON.stringify(payload.username)});set('crewlinkPassword',${JSON.stringify(payload.password)});const btn=[...f.elements].find(e=>e.type==='submit');if(btn)btn.click();else f.submit();return {ok:true};})()`;
-    await submitAndWait(cdp,sessionId,loginExpr,45000);await new Promise(r=>setTimeout(r,700));
+    await submitAndWait(cdp,sessionId,loginExpr,75000);await new Promise(r=>setTimeout(r,700));
     if(await evaluate(cdp,sessionId,`!![...document.forms].find(f=>f.elements?.crewlinkPassword)`))throw Error('CrewLink ha vuelto a la pantalla de acceso. Revisa usuario y contraseña.');
-    progress(48,'Abriendo Individual Duty Plan…');await navigate(cdp,sessionId,DUTY,45000);await new Promise(r=>setTimeout(r,500));
+    progress(48,'Abriendo Individual Duty Plan…');await navigate(cdp,sessionId,DUTY,75000);await new Promise(r=>setTimeout(r,500));
     const hasReport=await evaluate(cdp,sessionId,`!![...document.forms].find(f=>f.elements?.crewlinkOperation?.value==='makeReport')`);if(!hasReport)throw Error('No se pudo acceder a Individual Duty Plan.');
     progress(64,'Generando el roster…');
     const reportExpr=`(()=>{const f=[...document.forms].find(x=>x.elements?.crewlinkOperation?.value==='makeReport');if(!f)return {ok:false,reason:'No encuentro el formulario de Individual Duty Plan.'};const set=(n,v)=>{const el=f.elements[n];if(el)el.value=v;};set('buddyName','');set('beginDate',${JSON.stringify(dateForm(payload.start))});set('endDate',${JSON.stringify(dateForm(payload.end))});const btn=f.elements.selectBtn||[...f.elements].find(el=>el.type==='submit');if(btn)btn.click();else f.submit();return {ok:true};})()`;
-    await submitAndWait(cdp,sessionId,reportExpr,55000);
+    await submitWithoutLoadWait(cdp,sessionId,reportExpr);await new Promise(r=>setTimeout(r,900));
     progress(76,'Localizando el PDF generado…');let pdfUrl=null;
-    for(let i=0;i<35&&!pdfUrl;i++){
+    for(let i=0;i<90&&!pdfUrl;i++){
       const r=await evaluate(cdp,sessionId,`(()=>{const text=(document.body?.innerText||'').replace(/\\s+/g,' ').trim();if(/Internal processing error/i.test(text))return {error:'CrewLink devolvió un error interno al generar el roster.'};const el=document.querySelector('iframe[src*="viewer.html?file="],frame[src*="viewer.html?file="],embed[src*="viewer.html?file="]');if(el){try{const u=new URL(el.getAttribute('src'),location.href),f=u.searchParams.get('file');if(f)return {pdf:new URL(f,location.href).href};}catch{}}const html=document.documentElement?.innerHTML||'';const m=html.match(/\\/crewlink\\/temp\\/[^"'<>\\\\\\s]+\\.pdf/i);return m?{pdf:new URL(m[0],location.href).href}:{};})()`);
-      if(r?.error)throw Error(r.error);if(r?.pdf)pdfUrl=r.pdf;else await new Promise(x=>setTimeout(x,300));
+      if(r?.error)throw Error(r.error);if(r?.pdf)pdfUrl=r.pdf;else await new Promise(x=>setTimeout(x,500));
     }
     if(!pdfUrl)throw Error('CrewLink terminó la navegación pero no publicó el PDF.');if(!pdfUrl.startsWith(`${ORIGIN}/crewlink/temp/`))throw Error('CrewLink devolvió una ruta de PDF inesperada.');
     progress(86,'Descargando el PDF…');
     const fetchExpr=`(async()=>{const r=await fetch(${JSON.stringify(pdfUrl)},{credentials:'include',cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);const buf=await r.arrayBuffer();if(buf.byteLength>${MAX_PDF})throw new Error('PDF demasiado grande');const bytes=new Uint8Array(buf);if(String.fromCharCode(...bytes.slice(0,5))!=='%PDF-')throw new Error('PDF inválido');let binary='';const step=32768;for(let i=0;i<bytes.length;i+=step)binary+=String.fromCharCode(...bytes.subarray(i,i+step));return btoa(binary);})()`;
-    const pdfBase64=await evaluate(cdp,sessionId,fetchExpr,30000);if(!pdfBase64)throw Error('CrewLink no devolvió el PDF.');progress(91,'PDF recibido. Enviándolo a RosterHome…');return {pdfBase64};
+    const pdfBase64=await evaluate(cdp,sessionId,fetchExpr,60000);if(!pdfBase64)throw Error('CrewLink no devolvió el PDF.');progress(91,'PDF recibido. Enviándolo a RosterHome…');return {pdfBase64};
   }finally{payload.password='';try{await cdp.send('Browser.close',{},null,3000);}catch{}cdp.close();}
 }
 
@@ -286,13 +291,13 @@ async function parserAssetSource(env){
 async function parsePdfForAutoSync(env,pdfBase64,{profileName='',briefingLead=105}={}){
   const {cdp,sessionId}=await acquireCdp(env);
   try{
-    const loaded=await evaluate(cdp,sessionId,`(async()=>{if(window.pdfjsLib)return true;await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=${JSON.stringify(PDFJS_URL)};s.onload=resolve;s.onerror=()=>reject(new Error('No se pudo cargar PDF.js'));document.head.appendChild(s);});return !!window.pdfjsLib;})()`,30000);
+    const loaded=await evaluate(cdp,sessionId,`(async()=>{if(window.pdfjsLib)return true;await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=${JSON.stringify(PDFJS_URL)};s.onload=resolve;s.onerror=()=>reject(new Error('No se pudo cargar PDF.js'));document.head.appendChild(s);});return !!window.pdfjsLib;})()`,45000);
     if(!loaded)throw Error('No se pudo inicializar el lector PDF remoto.');
     const extractExpr=`(async()=>{const bin=atob(${JSON.stringify(pdfBase64)}),data=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)data[i]=bin.charCodeAt(i);const pdf=await pdfjsLib.getDocument({data,disableWorker:true}).promise;let out='';for(let p=1;p<=pdf.numPages;p++){const page=await pdf.getPage(p),viewport=page.getViewport({scale:1}),tc=await page.getTextContent();const items=tc.items.filter(i=>i.str&&i.str.trim()).map(i=>{const t=pdfjsLib.Util.transform(viewport.transform,i.transform),width=Number(i.width||0);return {str:i.str.trim(),x:t[4],cx:t[4]+width/2,y:t[5]};});const mid=viewport.width*.5;const build=xs=>{const rows=[];xs.sort((a,b)=>a.y-b.y||a.x-b.x);for(const it of xs){let row=rows.find(r=>Math.abs(r.y-it.y)<2.4);if(!row){row={y:it.y,items:[]};rows.push(row);}row.items.push(it);}rows.sort((a,b)=>a.y-b.y);return rows.map(r=>r.items.sort((a,b)=>a.x-b.x).map(x=>x.str).join(' ')).join('\\n');};out+='\\n'+build([...items]).split('\\n').filter(line=>/Local\\s+times\\s+at\\s+event\\s+airport|Individual duty plan|^Period:/i.test(line)).join('\\n')+'\\n';out+='\\n[[PAGE '+p+' LEFT]]\\n'+build(items.filter(i=>i.cx<mid))+'\\n[[PAGE '+p+' RIGHT]]\\n'+build(items.filter(i=>i.cx>=mid));}return out;})()`;
-    const text=await evaluate(cdp,sessionId,extractExpr,90000);if(!text||text.length<100)throw Error('El PDF de CrewLink no contiene texto utilizable.');
+    const text=await evaluate(cdp,sessionId,extractExpr,120000);if(!text||text.length<100)throw Error('El PDF de CrewLink no contiene texto utilizable.');
     const parserSource=await parserAssetSource(env);await evaluate(cdp,sessionId,parserSource+'\\n;!!globalThis.RosterParser',30000);
     const buildExpr=`(()=>{const parsed=RosterParser.parseCrewLinkText(${JSON.stringify(text)});const addDays=(d,n)=>new Date(d.getTime()+Number(n||0)*86400000);const dp=d=>({y:d.getUTCFullYear(),m:d.getUTCMonth()+1,d:d.getUTCDate()});const tp=v=>{const s=String(v||'').replace(':','').padStart(4,'0');return {h:+s.slice(0,2),min:+s.slice(2,4)}};const off=(date,tz)=>{const ps=new Intl.DateTimeFormat('en-US',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(date),o=Object.fromEntries(ps.map(p=>[p.type,p.value]));return Date.UTC(+o.year,+o.month-1,+o.day,+o.hour,+o.minute,+o.second)-date.getTime()};const zoned=(y,m,d,h,mi,tz)=>{let g=new Date(Date.UTC(y,m-1,d,h,mi,0)),a=off(g,tz);g=new Date(g.getTime()-a);const b=off(g,tz);if(a!==b)g=new Date(Date.UTC(y,m-1,d,h,mi,0)-b);return g};const wall=(date,hhmm,tz)=>{const a=dp(date),b=tp(hhmm);return tz==='UTC'?new Date(Date.UTC(a.y,a.m-1,a.d,b.h,b.min,0)):zoned(a.y,a.m,a.d,b.h,b.min,tz)};const instants=duty=>{if(duty?.kind!=='duty'||duty.serviceType!=='flight'||!(duty.flights||[]).length)return [];const key=duty.sourceCheckInDate||duty.date;if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(String(key||'')))return [];const base=new Date(key+'T00:00:00Z');let prev=null,out=[];for(const f of duty.flights){let dd=addDays(base,f.depDayOffset||0),ad=addDays(base,f.arrDayOffset||0),dz=duty.timeBasis==='local_event'?(RosterParser.airportTimeZone(f.dep)||'UTC'):'UTC',az=duty.timeBasis==='local_event'?(RosterParser.airportTimeZone(f.arr)||'UTC'):'UTC',start=wall(dd,f.depTime,dz);while(prev&&start<prev){dd=addDays(dd,1);start=wall(dd,f.depTime,dz)}let end=wall(ad,f.arrTime,az);while(end<=start){ad=addDays(ad,1);end=wall(ad,f.arrTime,az)}out.push({flight:f,start,end});prev=end;}return out};const flights=[],briefings=[],lead=${Number(briefingLead)||105},person=${JSON.stringify(profileName)};for(const d of parsed.duties||[]){const xs=instants(d);if(!xs.length)continue;const first=xs[0],bs=new Date(first.start.getTime()-lead*60000);briefings.push({uid:['briefing',d.date,d.route,bs.toISOString()].join('.').replace(/[^A-Za-z0-9.@_-]/g,'-')+'@rosterhome.local',start:bs.toISOString(),end:new Date(bs.getTime()+15*60000).toISOString(),summary:'Briefing · '+(d.route||first.flight.dep+'–'+first.flight.arr),description:person+' · '+lead+' min antes del primer vuelo',location:d.base||first.flight.dep||''});for(const x of xs){const f=x.flight,no=(f.carrier||'')+(f.number||'');flights.push({uid:['flight',d.date,no,f.dep,f.arr,x.start.toISOString()].join('.').replace(/[^A-Za-z0-9.@_-]/g,'-')+'@rosterhome.local',start:x.start.toISOString(),end:x.end.toISOString(),summary:(no||'Vuelo')+' · '+f.dep+' → '+f.arr,description:person+(d.route?' · duty '+d.route:'')+(f.aircraft?' · '+f.aircraft:''),location:f.dep+' → '+f.arr});}}return JSON.stringify({parsed,briefings,flights});})()`;
-    const packed=await evaluate(cdp,sessionId,buildExpr,60000);if(!packed)throw Error('El parser remoto no devolvió datos.');return JSON.parse(packed);
+    const packed=await evaluate(cdp,sessionId,buildExpr,90000);if(!packed)throw Error('El parser remoto no devolvió datos.');return JSON.parse(packed);
   }finally{try{await cdp.send('Browser.close',{},null,3000);}catch{}cdp.close();}
 }
 function registryStub(env){const id=env.CALENDAR_STORE.idFromName(AUTO_REGISTRY_ID);return env.CALENDAR_STORE.get(id);}
@@ -303,18 +308,33 @@ async function runAutoSyncProfile(env,token,profile){
   const stub=await tokenStore(env,token),jobsData=await (await stub.fetch('https://calendar-store/autosync/jobs')).json(),job=jobsData.jobs?.[String(profile)];
   if(!job?.enabled)return {ok:false,skipped:true};
   const range=autoRange(),attempt=new Date().toISOString();
-  try{
-    const creds=await openCredentials(env.ROSTERHOME_ACCESS_KEY,job.encryptedCredentials),username=String(creds.username||'').toUpperCase();
-    const sync=await browserSync(env,{username:creds.username,password:creds.password,start:range.start,end:range.end},()=>{});
-    const processed=await parsePdfForAutoSync(env,sync.pdfBase64,{profileName:job.name||job.crewCode,briefingLead:job.briefingLead});
-    const parsed=processed.parsed;
-    if(parsed?.crew?.crewCode?.toUpperCase()!==username)throw Error('CrewLink devolvió un roster de otro usuario.');
-    if(!parsed?.coverage?.complete)throw Error('El roster diario no reconcilia sus totales; se conserva el último roster válido.');
-    let calendars={briefings:null,flights:null};
-    if(jobsData.calendarProfile===Number(profile))calendars=calendarBundle(job.name||job.crewCode,processed.briefings,processed.flights);
-    const result=await stub.fetch('https://calendar-store/autosync/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:Number(profile),parsed,range,...calendars})});
-    if(!result.ok)throw Error('No se pudo guardar el roster automático.');return {ok:true,profile:Number(profile),range,attempt};
-  }catch(error){const message=safeCrewlinkError(error);await stub.fetch('https://calendar-store/autosync/fail',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:Number(profile),error:message})});throw Error(message);}
+  let lastError=null;
+  for(let tryNo=1;tryNo<=2;tryNo++){
+    try{
+      const creds=await openCredentials(env.ROSTERHOME_ACCESS_KEY,job.encryptedCredentials),username=String(creds.username||'').toUpperCase();
+      let sync;
+      try{sync=await browserSync(env,{username:creds.username,password:creds.password,start:range.start,end:range.end},()=>{});}
+      catch(error){throw Error('CrewLink: '+String(error?.message||error));}
+      let processed;
+      try{processed=await parsePdfForAutoSync(env,sync.pdfBase64,{profileName:job.name||job.crewCode,briefingLead:job.briefingLead});}
+      catch(error){throw Error('Parser remoto: '+String(error?.message||error));}
+      const parsed=processed.parsed;
+      if(parsed?.crew?.crewCode?.toUpperCase()!==username)throw Error('CrewLink devolvió un roster de otro usuario.');
+      if(!parsed?.coverage?.complete)throw Error('El roster diario no reconcilia sus totales; se conserva el último roster válido.');
+      let calendars={briefings:null,flights:null};
+      if(jobsData.calendarProfile===Number(profile))calendars=calendarBundle(job.name||job.crewCode,processed.briefings,processed.flights);
+      const result=await stub.fetch('https://calendar-store/autosync/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:Number(profile),parsed,range,...calendars})});
+      if(!result.ok)throw Error('No se pudo guardar el roster automático.');
+      return {ok:true,profile:Number(profile),range,attempt,tries:tryNo};
+    }catch(error){
+      lastError=error;
+      const message=String(error?.message||error);
+      const retryable=/timeout|timed out|cerró la conexión|Error de conexión|HTTP 5\d\d|no publicó el PDF/i.test(message);
+      if(tryNo<2&&retryable){await new Promise(r=>setTimeout(r,1800));continue;}
+      break;
+    }
+  }
+  const message=safeCrewlinkError(lastError);await stub.fetch('https://calendar-store/autosync/fail',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:Number(profile),error:message})});throw Error(message);
 }
 async function runAllAutoSync(env){
   if(!env.CALENDAR_STORE||!env.BROWSER)return;

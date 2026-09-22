@@ -1,4 +1,4 @@
-/* RosterHome v1.1.0 · daily CrewLink Auto Sync */
+/* RosterHome v1.1.1 · daily CrewLink Auto Sync */
 (()=>{
   const $=id=>document.getElementById(id);if(!$('autoSyncCard'))return;
   const KEY_STORE='rosterhome_cloud_access_key',TOKEN_STORE='rosterhome_calendar_feed_token',APPLIED='rosterhome_autosync_applied_';
@@ -50,9 +50,16 @@
     try{
       try{localStorage.setItem(KEY_STORE,key);}catch{}
       await api('/api/autosync/config',{method:'POST',body:{token:token(),profile:i,username:user,password,name:personName(i),briefingLead:lead(i)}});
-      $('autoSyncPassword').value='';status('Credenciales guardadas. Primera sincronización en marcha…');
-      await api('/api/autosync/run',{method:'POST',body:{token:token(),profile:i}});await refreshStatus({silent:true});await pullRoster(i);status(`✓ Auto Sync activado para ${personName(i)}. Se comprobará una vez al día.`,'ok');
-    }catch(err){status(`No se pudo activar Auto Sync: ${err.message}`,'error');await refreshStatus({silent:true});}
+      $('autoSyncPassword').value='';jobs[String(i)]={...(jobs[String(i)]||{}),profile:i,enabled:true,crewCode:user.toUpperCase(),name:personName(i)};renderJobs();syncUser();
+      status('✓ Auto Sync activado. Haciendo la primera actualización…','ok');
+      try{
+        await api('/api/autosync/run',{method:'POST',body:{token:token(),profile:i}});await refreshStatus({silent:true});await pullRoster(i);
+        status(`✓ Auto Sync activado para ${personName(i)} y primera actualización completada.`,'ok');
+      }catch(syncErr){
+        await refreshStatus({silent:true});
+        status(`✓ Auto Sync está activado para ${personName(i)}. La primera actualización falló: ${syncErr.message} Se reintentará automáticamente mañana y puedes pulsar “Actualizar ahora”.`,'warn');
+      }
+    }catch(err){status(`No se pudo guardar la configuración de Auto Sync: ${err.message}`,'error');await refreshStatus({silent:true});}
     finally{$('autoSyncPassword').value='';lock(false);syncUser();}
   }
   async function runNow(){
