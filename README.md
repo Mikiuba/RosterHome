@@ -1,4 +1,4 @@
-# RosterHome v1.1.2 — iPhone Direct + Windows Bridge
+# RosterHome v1.1.4 — iPhone Direct + Windows Bridge
 
 Esta versión permite actualizar CrewLink directamente desde iPhone/Safari sin depender del PC.
 
@@ -235,3 +235,27 @@ con la URL-token no adivinable.
 - La creación de una segunda sesión reintenta automáticamente un `429` transitorio.
 - Los errores de timeout conservan la fase (`login`, `Individual Duty Plan`,
   generación del PDF, etc.) para que el diagnóstico sea concreto.
+
+
+## v1.1.3 — localización robusta del PDF de CrewLink
+
+El login y la generación del reporte podían completarse correctamente pero CrewLink
+abría el PDF en una pestaña/visor separado, por lo que el Worker solo mirando la
+página original no encontraba el archivo.
+
+Ahora RosterHome busca el PDF en:
+- URL y DOM de la página actual.
+- iframes, frames, embeds, objects y enlaces.
+- recursos cargados por Performance API.
+- HTML/JavaScript con rutas `/crewlink/temp/*.pdf`.
+- nuevas pestañas/targets de Chrome mediante `Target.getTargets`.
+- visores que esconden el PDF dentro de `?file=`, `?src=` o `?url=`.
+
+
+## v1.1.4 — fechas CrewLink desde hoy hasta el máximo disponible
+
+- El selector manual de CrewLink ya no permite fechas pasadas.
+- `Desde` arranca en **hoy**.
+- `Hasta` arranca en el **último día seleccionable** (fin del mes actual + dos meses).
+- El backend valida la misma ventana.
+- Auto Sync usa esa misma ventana dinámica cada día: **hoy → último seleccionable**.

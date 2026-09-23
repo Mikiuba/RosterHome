@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="RosterHome" />
   <title>RosterHome</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=1.1.2" />
+  <link rel="stylesheet" href="styles.css?v=1.1.4" />
 </head>
 <body>
 <div class="app">
@@ -338,6 +338,7 @@
           <button class="btn" id="autoSyncRun" type="button" disabled>Actualizar ahora</button>
           <button class="btn" id="autoSyncDisable" type="button" disabled>Desactivar</button>
         </div>
+        <p class="rules-help muted">Cada actualización pide a CrewLink únicamente desde <b>hoy</b> hasta el <b>último día disponible</b> del periodo seleccionable. La ventana avanza automáticamente cada día.</p>
         <p class="rules-help muted">La contraseña no se guarda en el iPhone. En el servidor se cifra con AES-GCM usando la clave secreta de RosterHome. Si una actualización falla, se conserva el último roster válido.</p>
         <div id="autoSyncProfiles" class="auto-sync-profiles"></div>
         <p id="autoSyncStatus" class="calendar-export-status muted" role="status" aria-live="polite"></p>
@@ -393,7 +394,7 @@
     </div>
   </section>
 
-  <div class="footer">RosterHome v1.1.2 · Together · Motor FTL OM-A core activo.</div>
+  <div class="footer">RosterHome v1.1.4 · Together · Motor FTL OM-A core activo.</div>
 </div>
 
 <div id="eventModal" class="modal hidden" aria-hidden="true">
@@ -444,16 +445,16 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="storage.js?v=1.1.2"></script>
-<script src="roster-parser.js?v=1.1.2"></script>
-<script src="roster-history.js?v=1.1.2"></script>
-<script src="ftl-engine.js?v=1.1.2"></script>
-<script src="app.js?v=1.1.2"></script>
-<script src="enhancements.js?v=1.1.2"></script>
-<script src="calendar-export.js?v=1.1.2"></script>
-<script src="calendar-subscriptions.js?v=1.1.2"></script>
-<script src="auto-sync.js?v=1.1.2"></script>
-<script src="crewlink-changes.js?v=1.1.2"></script>
-<script src="crewlink-sync.js?v=1.1.2"></script>
+<script src="storage.js?v=1.1.4"></script>
+<script src="roster-parser.js?v=1.1.4"></script>
+<script src="roster-history.js?v=1.1.4"></script>
+<script src="ftl-engine.js?v=1.1.4"></script>
+<script src="app.js?v=1.1.4"></script>
+<script src="enhancements.js?v=1.1.4"></script>
+<script src="calendar-export.js?v=1.1.4"></script>
+<script src="calendar-subscriptions.js?v=1.1.4"></script>
+<script src="auto-sync.js?v=1.1.4"></script>
+<script src="crewlink-changes.js?v=1.1.4"></script>
+<script src="crewlink-sync.js?v=1.1.4"></script>
 </body>
 </html>

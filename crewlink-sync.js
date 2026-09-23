@@ -1,4 +1,4 @@
-/* RosterHome v1.1.2 — Hybrid CrewLink import.
+/* RosterHome v1.1.4 — Hybrid CrewLink import.
  * Desktop Chrome: uses the local RosterHome Bridge when present.
  * iPhone/Safari or any browser without the extension: uses a temporary Cloudflare Browser Run session.
  */
@@ -17,7 +17,7 @@
         <div><label for="clUser">Usuario CrewLink</label><input id="clUser" required maxlength="16" autocomplete="username" autocapitalize="none"></div>
       </div>
       <label for="clPassword">Contraseña CrewLink</label><input id="clPassword" type="password" required maxlength="256" autocomplete="current-password">
-      <div class="fieldrow"><div><label for="clStart">Desde</label><input id="clStart" type="date" required></div><div><label for="clEnd">Hasta</label><input id="clEnd" type="date" required></div></div>
+      <div class="fieldrow"><div><label for="clStart">Desde</label><input id="clStart" type="date" required></div><div><label for="clEnd">Hasta</label><input id="clEnd" type="date" required></div></div><p id="clDateWindow" class="muted"></p>
       <div id="clCloudAuth" hidden>
         <label for="clAccessKey">Clave privada de RosterHome</label><input id="clAccessKey" type="password" maxlength="256" autocomplete="off" placeholder="ROSTERHOME_ACCESS_KEY">
         <label class="crewlink-check"><input id="clRememberKey" type="checkbox" checked> Recordar esta clave en este dispositivo.</label>
@@ -37,8 +37,24 @@
     </form>
     <p id="clResult" role="status" aria-live="polite"></p><p id="clDiff"></p>`;
 
-  const now=new Date(),month=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-  $('clStart').value=month+'-01';$('clEnd').value=month+'-'+new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
+  function localDateKey(d){
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+  function crewlinkSelectableWindow(now=new Date()){
+    const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+    const last=new Date(now.getFullYear(),now.getMonth()+3,0);
+    return {min:localDateKey(today),max:localDateKey(last)};
+  }
+  const selectable=crewlinkSelectableWindow();
+  $('clStart').min=selectable.min;$('clStart').max=selectable.max;
+  $('clEnd').min=selectable.min;$('clEnd').max=selectable.max;
+  $('clStart').value=selectable.min;$('clEnd').value=selectable.max;
+  $('clDateWindow').textContent=`Periodo disponible: hoy (${selectable.min}) → ${selectable.max}.`;
+  $('clStart').addEventListener('change',()=>{
+    const start=$('clStart').value||selectable.min;
+    $('clEnd').min=start;
+    if($('clEnd').value<start)$('clEnd').value=start;
+  });
   try{$('clAccessKey').value=localStorage.getItem(KEY_STORE)||'';}catch{}
 
   function mode(){return bridgeVersion?'bridge':(cloudInfo?.cloudBrowser?'cloud':null);}
@@ -149,7 +165,11 @@
   $('clForm').addEventListener('submit',async event=>{
     event.preventDefault();if(busy||!$('clHttp').checked)return;
     const person=Number($('clPerson').value),input=$('file'+person),start=$('clStart').value,end=$('clEnd').value,username=$('clUser').value.trim(),password=$('clPassword').value;
-    if(end<start){$('clResult').textContent='Revisa el periodo seleccionado.';return;}if(input.disabled){$('clResult').textContent='Espera a que termine la otra importación.';return;}
+    const windowNow=crewlinkSelectableWindow();
+    if(!start||!end||start<windowNow.min||end>windowNow.max||end<start){
+      $('clResult').textContent=`El periodo debe estar entre hoy (${windowNow.min}) y ${windowNow.max}.`;return;
+    }
+    if(input.disabled){$('clResult').textContent='Espera a que termine la otra importación.';return;}
     const before=JSON.stringify(state.people[person]);input.disabled=true;lock(true);$('clResult').textContent='';$('clDiff').textContent='';resetProgress();
     try{
       let r;

@@ -2,13 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-test('v1.1.2 exposes private subscribed calendar UI and client',()=>{
+test('v1.1.4 exposes private subscribed calendar UI and client',()=>{
   const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
   const js=fs.readFileSync(new URL('../calendar-subscriptions.js',import.meta.url),'utf8');
   assert.match(html,/id="calendarEnableSync"/);
   assert.match(html,/id="installBriefingsCalendar"/);
   assert.match(html,/id="installFlightsCalendar"/);
-  assert.match(html,/calendar-subscriptions\.js\?v=1\.1\.2/);
+  assert.match(html,/calendar-subscriptions\.js\?v=1\.1\.4/);
   assert.match(js,/\/api\/calendar\/publish/);
   assert.match(js,/webcal:/);
   assert.match(js,/rh-storage-saved/);

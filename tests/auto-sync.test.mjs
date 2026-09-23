@@ -2,13 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-test('v1.1.2 exposes daily CrewLink Auto Sync UI',()=>{
+test('v1.1.4 exposes daily CrewLink Auto Sync UI',()=>{
   const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
   const js=fs.readFileSync(new URL('../auto-sync.js',import.meta.url),'utf8');
   assert.match(html,/id="autoSyncEnable"/);
   assert.match(html,/id="autoSyncRun"/);
   assert.match(html,/id="autoSyncDisable"/);
-  assert.match(html,/auto-sync\.js\?v=1\.1\.2/);
+  assert.match(html,/auto-sync\.js\?v=1\.1\.4/);
   assert.match(js,/\/api\/autosync\/config/);
   assert.match(js,/\/api\/autosync\/run/);
   assert.match(js,/\/api\/autosync\/roster/);

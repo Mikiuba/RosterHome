@@ -1,4 +1,4 @@
-/* RosterHome v1.1.2 · subscribed Apple calendars */
+/* RosterHome v1.1.4 · subscribed Apple calendars */
 (()=>{
   const $=id=>document.getElementById(id);
   const KEY_STORE='rosterhome_cloud_access_key';
