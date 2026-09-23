@@ -1,4 +1,4 @@
-# RosterHome v1.1.1 — iPhone Direct + Windows Bridge
+# RosterHome v1.1.2 — iPhone Direct + Windows Bridge
 
 Esta versión permite actualizar CrewLink directamente desde iPhone/Safari sin depender del PC.
 
@@ -225,3 +225,13 @@ con la URL-token no adivinable.
 - Si la primera actualización falla, la configuración sigue activa y el cron diario reintentará automáticamente; la UI ya no dice erróneamente que no se pudo activar.
 - El Service Worker respeta el query de versión de CSS/JS para evitar mezclar HTML nuevo con estilos antiguos.
 - Estado de Auto Sync corregido para iPhone: cada línea y error se muestran en bloques separados.
+
+
+## v1.1.2 — Browser Run estable para Auto Sync
+
+- Las sesiones de Browser Run se crean con `keep_alive=600000` (10 minutos).
+- CrewLink ya no depende de `Page.loadEventFired`, que podía dejar la sesión
+  inactiva y provocar cierres/timeout; ahora se sondea activamente el DOM.
+- La creación de una segunda sesión reintenta automáticamente un `429` transitorio.
+- Los errores de timeout conservan la fase (`login`, `Individual Duty Plan`,
+  generación del PDF, etc.) para que el diagnóstico sea concreto.

@@ -1,4 +1,4 @@
-/* RosterHome v1.1.1 · daily CrewLink Auto Sync */
+/* RosterHome v1.1.2 · daily CrewLink Auto Sync */
 (()=>{
   const $=id=>document.getElementById(id);if(!$('autoSyncCard'))return;
   const KEY_STORE='rosterhome_cloud_access_key',TOKEN_STORE='rosterhome_calendar_feed_token',APPLIED='rosterhome_autosync_applied_';

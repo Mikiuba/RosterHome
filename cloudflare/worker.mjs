@@ -1,4 +1,4 @@
-const VERSION='1.1.1';
+const VERSION='1.1.2';
 const START='http://crewlink.corendonairlines.com:8090/crewlink/crewlink.jsp?crewlinkOperation=crewlinkForCrew&resetSession=Y';
 const DUTY='http://crewlink.corendonairlines.com:8090/crewlink/clApp?crewlinkService=individualDutyPlan&crewlinkOperation=default&crewlinkSourcePage=spCrew';
 const ORIGIN='http://crewlink.corendonairlines.com:8090';
@@ -29,7 +29,10 @@ function validatePayload(payload){
 function safeCrewlinkError(error){
   const message=String(error?.message||error||'No se pudo completar CrewLink.').replace(/\s+/g,' ').trim();
   if(/parser remoto|lector PDF|PDF de CrewLink/i.test(message)&&/timeout|timed out/i.test(message))return 'El procesamiento del PDF tardó demasiado. El roster guardado sigue intacto y Auto Sync volverá a intentarlo.';
-  if(/timeout|timed out/i.test(message))return 'CrewLink tardó demasiado en responder. El roster guardado sigue intacto y Auto Sync volverá a intentarlo.';
+  if(/timeout|timed out/i.test(message)){
+    const phase=(message.match(/CrewLink:\s*([^:]+):\s*Timeout/i)||message.match(/^([^:]+):\s*Timeout/i))?.[1]?.trim();
+    return `${phase?`Timeout en ${phase}. `:'CrewLink tardó demasiado en responder. '}El roster guardado sigue intacto y Auto Sync volverá a intentarlo.`;
+  }
   if(/429|browser time limit/i.test(message))return 'Se ha agotado el tiempo diario de navegador de Cloudflare. Auto Sync volverá a intentarlo en la siguiente ejecución.';
   if(/Internal processing error/i.test(message))return 'CrewLink devolvió un error interno al generar el roster. Auto Sync volverá a intentarlo.';
   return message.slice(0,500);
@@ -226,13 +229,21 @@ class CdpClient{
 }
 async function acquireCdp(env){
   if(!env.BROWSER?.fetch)throw Error('Browser Run no está disponible en este deployment.');
-  // Browser Run exposes its Worker binding as a Fetcher. These are the same
-  // endpoints used by Cloudflare's current @cloudflare/puppeteer transport.
   const host='https://fake.host';
-  const acquire=await env.BROWSER.fetch(`${host}/v1/devtools/browser?`,{method:'POST'});
-  if(!acquire.ok)throw Error(`Cloudflare Browser Run respondió HTTP ${acquire.status}.`);
+  let acquire=null;
+  for(let attempt=1;attempt<=2;attempt++){
+    acquire=await env.BROWSER.fetch(`${host}/v1/devtools/browser?keep_alive=600000`,{method:'POST'});
+    if(acquire.ok)break;
+    if(acquire.status===429&&attempt<2){
+      const retryHeader=Number(acquire.headers.get('Retry-After')||0);
+      const waitMs=Math.max(21000,Math.min(30000,retryHeader>0?retryHeader*1000:21000));
+      await new Promise(r=>setTimeout(r,waitMs));
+      continue;
+    }
+    throw Error(`Cloudflare Browser Run respondió HTTP ${acquire.status}.`);
+  }
   const info=await acquire.json();if(!info?.sessionId)throw Error('Cloudflare no devolvió una sesión de navegador.');
-  const upgrade=await env.BROWSER.fetch(`${host}/v1/devtools/browser/${encodeURIComponent(info.sessionId)}`,{headers:{Upgrade:'websocket','cf-brapi-client':'RosterHome/1.1.1'}});
+  const upgrade=await env.BROWSER.fetch(`${host}/v1/devtools/browser/${encodeURIComponent(info.sessionId)}`,{headers:{Upgrade:'websocket','cf-brapi-client':'RosterHome/1.1.2'}});
   if(!upgrade.webSocket)throw Error(`No se pudo abrir el canal de control del navegador remoto (HTTP ${upgrade.status}).`);
   const ws=upgrade.webSocket;ws.accept();const cdp=new CdpClient(ws);
   const {targetId}=await cdp.send('Target.createTarget',{url:'about:blank'});
@@ -241,47 +252,89 @@ async function acquireCdp(env){
   await Promise.all([cdp.send('Page.enable',{},sessionId),cdp.send('Runtime.enable',{},sessionId),cdp.send('Network.enable',{},sessionId)]);
   return {cdp,sessionId};
 }
-async function navigate(cdp,sessionId,url,timeout=75000){
-  const loaded=cdp.waitEvent('Page.loadEventFired',sessionId,timeout);const r=await cdp.send('Page.navigate',{url},sessionId,timeout);if(r.errorText)throw Error(`No se pudo abrir CrewLink: ${r.errorText}`);await loaded;
+async function waitUntil(cdp,sessionId,predicate,{timeout=65000,interval=450,label='la página'}={}){
+  const started=Date.now();let last=null;
+  while(Date.now()-started<timeout){
+    try{
+      const ok=await evaluate(cdp,sessionId,predicate,12000);
+      if(ok)return true;
+    }catch(error){last=error;}
+    await new Promise(r=>setTimeout(r,interval));
+  }
+  throw Error(`Timeout esperando ${label}${last?`: ${String(last.message||last)}`:''}`);
+}
+async function navigateUntil(cdp,sessionId,url,predicate,label,timeout=65000){
+  const r=await cdp.send('Page.navigate',{url},sessionId,15000);
+  if(r.errorText)throw Error(`No se pudo abrir ${label}: ${r.errorText}`);
+  await waitUntil(cdp,sessionId,predicate,{timeout,label});
 }
 async function evaluate(cdp,sessionId,expression,timeout=45000){
   const r=await cdp.send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true,userGesture:true},sessionId,timeout);
   if(r.exceptionDetails)throw Error(r.exceptionDetails.text||r.exceptionDetails.exception?.description||'Error ejecutando CrewLink.');return r.result?.value;
 }
-async function submitAndWait(cdp,sessionId,expression,timeout=75000){
-  const loaded=cdp.waitEvent('Page.loadEventFired',sessionId,timeout);const result=await evaluate(cdp,sessionId,expression,10000);if(!result?.ok){loaded.catch(()=>{});throw Error(result?.reason||'No se pudo enviar el formulario de CrewLink.');}await loaded;
+async function submitAndPoll(cdp,sessionId,expression,predicate,label,timeout=65000){
+  const result=await evaluate(cdp,sessionId,expression,12000);
+  if(!result?.ok)throw Error(result?.reason||`No se pudo enviar ${label}.`);
+  await waitUntil(cdp,sessionId,predicate,{timeout,label});
 }
 async function submitWithoutLoadWait(cdp,sessionId,expression){
   const result=await evaluate(cdp,sessionId,expression,15000);
   if(!result?.ok)throw Error(result?.reason||'No se pudo enviar el formulario de CrewLink.');
 }
 async function browserProbe(env){
-  const {cdp,sessionId}=await acquireCdp(env);try{await navigate(cdp,sessionId,START,60000);const ok=await evaluate(cdp,sessionId,`!![...document.forms].find(f=>f.elements?.crewlinkPassword)`);if(!ok)throw Error('CrewLink abre, pero no reconozco su formulario de acceso.');return {message:'✓ Cloudflare abre CrewLink correctamente. No se han enviado credenciales.'};}finally{try{await cdp.send('Browser.close',{},null,3000);}catch{}cdp.close();}
+  const {cdp,sessionId}=await acquireCdp(env);
+  try{
+    await navigateUntil(cdp,sessionId,START,`!![...document.forms].find(f=>f.elements?.crewlinkPassword)`,'la pantalla de acceso de CrewLink',60000);
+    return {message:'✓ Cloudflare abre CrewLink correctamente. No se han enviado credenciales.'};
+  }finally{try{await cdp.send('Browser.close',{},null,3000);}catch{}cdp.close();}
 }
 async function browserSync(env,payload,progress){
-  validatePayload(payload);progress(8,'Iniciando navegador seguro en Cloudflare…');const {cdp,sessionId}=await acquireCdp(env);
+  validatePayload(payload);let phase='inicializando Browser Run';progress(8,'Iniciando navegador seguro en Cloudflare…');const {cdp,sessionId}=await acquireCdp(env);
   try{
-    progress(18,'Abriendo CrewLink…');await navigate(cdp,sessionId,START,60000);
-    const loginForm=await evaluate(cdp,sessionId,`!![...document.forms].find(f=>f.elements?.crewlinkPassword)`);if(!loginForm)throw Error('CrewLink abre, pero no reconozco su formulario de acceso.');
+    phase='abriendo CrewLink';
+    progress(18,'Abriendo CrewLink…');
+    await navigateUntil(cdp,sessionId,START,`!![...document.forms].find(f=>f.elements?.crewlinkPassword)`,'el login de CrewLink',60000);
+
+    phase='iniciando sesión';
     progress(32,'Iniciando sesión en CrewLink…');
     const loginExpr=`(()=>{const f=[...document.forms].find(x=>x.elements?.crewlinkPassword);if(!f)return {ok:false,reason:'No encuentro el formulario de acceso.'};const set=(n,v)=>{const e=f.elements[n];if(e)e.value=v;};set('crewlinkUserName',${JSON.stringify(payload.username)});set('crewlinkPassword',${JSON.stringify(payload.password)});const btn=[...f.elements].find(e=>e.type==='submit');if(btn)btn.click();else f.submit();return {ok:true};})()`;
-    await submitAndWait(cdp,sessionId,loginExpr,75000);await new Promise(r=>setTimeout(r,700));
-    if(await evaluate(cdp,sessionId,`!![...document.forms].find(f=>f.elements?.crewlinkPassword)`))throw Error('CrewLink ha vuelto a la pantalla de acceso. Revisa usuario y contraseña.');
-    progress(48,'Abriendo Individual Duty Plan…');await navigate(cdp,sessionId,DUTY,75000);await new Promise(r=>setTimeout(r,500));
-    const hasReport=await evaluate(cdp,sessionId,`!![...document.forms].find(f=>f.elements?.crewlinkOperation?.value==='makeReport')`);if(!hasReport)throw Error('No se pudo acceder a Individual Duty Plan.');
+    await submitAndPoll(cdp,sessionId,loginExpr,`!document.querySelector('input[name="crewlinkPassword"]') && ![...document.forms].find(f=>f.elements?.crewlinkPassword)`,'el inicio de sesión de CrewLink',65000);
+
+    phase='abriendo Individual Duty Plan';
+    progress(48,'Abriendo Individual Duty Plan…');
+    await navigateUntil(cdp,sessionId,DUTY,`!![...document.forms].find(f=>f.elements?.crewlinkOperation?.value==='makeReport')`,'Individual Duty Plan',65000);
+
+    phase='generando el roster';
     progress(64,'Generando el roster…');
     const reportExpr=`(()=>{const f=[...document.forms].find(x=>x.elements?.crewlinkOperation?.value==='makeReport');if(!f)return {ok:false,reason:'No encuentro el formulario de Individual Duty Plan.'};const set=(n,v)=>{const el=f.elements[n];if(el)el.value=v;};set('buddyName','');set('beginDate',${JSON.stringify(dateForm(payload.start))});set('endDate',${JSON.stringify(dateForm(payload.end))});const btn=f.elements.selectBtn||[...f.elements].find(el=>el.type==='submit');if(btn)btn.click();else f.submit();return {ok:true};})()`;
-    await submitWithoutLoadWait(cdp,sessionId,reportExpr);await new Promise(r=>setTimeout(r,900));
-    progress(76,'Localizando el PDF generado…');let pdfUrl=null;
-    for(let i=0;i<90&&!pdfUrl;i++){
-      const r=await evaluate(cdp,sessionId,`(()=>{const text=(document.body?.innerText||'').replace(/\\s+/g,' ').trim();if(/Internal processing error/i.test(text))return {error:'CrewLink devolvió un error interno al generar el roster.'};const el=document.querySelector('iframe[src*="viewer.html?file="],frame[src*="viewer.html?file="],embed[src*="viewer.html?file="]');if(el){try{const u=new URL(el.getAttribute('src'),location.href),f=u.searchParams.get('file');if(f)return {pdf:new URL(f,location.href).href};}catch{}}const html=document.documentElement?.innerHTML||'';const m=html.match(/\\/crewlink\\/temp\\/[^"'<>\\\\\\s]+\\.pdf/i);return m?{pdf:new URL(m[0],location.href).href}:{};})()`);
-      if(r?.error)throw Error(r.error);if(r?.pdf)pdfUrl=r.pdf;else await new Promise(x=>setTimeout(x,500));
+    await submitWithoutLoadWait(cdp,sessionId,reportExpr);
+
+    phase='esperando el PDF';
+    progress(76,'Esperando el PDF de CrewLink…');
+    let pdfUrl=null;
+    for(let i=0;i<120&&!pdfUrl;i++){
+      const r=await evaluate(cdp,sessionId,`(()=>{const text=(document.body?.innerText||'').replace(/\\s+/g,' ').trim();if(/Internal processing error/i.test(text))return {error:'CrewLink devolvió un error interno al generar el roster.'};const el=document.querySelector('iframe[src*="viewer.html?file="],frame[src*="viewer.html?file="],embed[src*="viewer.html?file="]');if(el){try{const u=new URL(el.getAttribute('src'),location.href),f=u.searchParams.get('file');if(f)return {pdf:new URL(f,location.href).href};}catch{}}const html=document.documentElement?.innerHTML||'';const m=html.match(/\\/crewlink\\/temp\\/[^"'<>\\\\\\s]+\\.pdf/i);return m?{pdf:new URL(m[0],location.href).href}:{};})()`,12000);
+      if(r?.error)throw Error(r.error);
+      if(r?.pdf)pdfUrl=r.pdf;
+      else await new Promise(x=>setTimeout(x,500));
     }
-    if(!pdfUrl)throw Error('CrewLink terminó la navegación pero no publicó el PDF.');if(!pdfUrl.startsWith(`${ORIGIN}/crewlink/temp/`))throw Error('CrewLink devolvió una ruta de PDF inesperada.');
+    if(!pdfUrl)throw Error('CrewLink terminó la navegación pero no publicó el PDF.');
+    if(!pdfUrl.startsWith(`${ORIGIN}/crewlink/temp/`))throw Error('CrewLink devolvió una ruta de PDF inesperada.');
+
+    phase='descargando el PDF';
     progress(86,'Descargando el PDF…');
     const fetchExpr=`(async()=>{const r=await fetch(${JSON.stringify(pdfUrl)},{credentials:'include',cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);const buf=await r.arrayBuffer();if(buf.byteLength>${MAX_PDF})throw new Error('PDF demasiado grande');const bytes=new Uint8Array(buf);if(String.fromCharCode(...bytes.slice(0,5))!=='%PDF-')throw new Error('PDF inválido');let binary='';const step=32768;for(let i=0;i<bytes.length;i+=step)binary+=String.fromCharCode(...bytes.subarray(i,i+step));return btoa(binary);})()`;
-    const pdfBase64=await evaluate(cdp,sessionId,fetchExpr,60000);if(!pdfBase64)throw Error('CrewLink no devolvió el PDF.');progress(91,'PDF recibido. Enviándolo a RosterHome…');return {pdfBase64};
-  }finally{payload.password='';try{await cdp.send('Browser.close',{},null,3000);}catch{}cdp.close();}
+    const pdfBase64=await evaluate(cdp,sessionId,fetchExpr,60000);
+    if(!pdfBase64)throw Error('CrewLink no devolvió el PDF.');
+    progress(91,'PDF recibido. Enviándolo a RosterHome…');
+    return {pdfBase64};
+  }catch(error){
+    throw Error(`${phase}: ${String(error?.message||error)}`);
+  }finally{
+    payload.password='';
+    try{await cdp.send('Browser.close',{},null,3000);}catch{}
+    cdp.close();
+  }
 }
 
 async function parserAssetSource(env){

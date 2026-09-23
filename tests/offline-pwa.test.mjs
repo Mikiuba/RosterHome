@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 import {readEnhancementsSource} from './_enhancements-source.mjs';
-test('v1.1.1 precaches the app shell for offline use',()=>{
+test('v1.1.2 precaches the app shell for offline use',()=>{
   const sw=fs.readFileSync(new URL('../service-worker.js',import.meta.url),'utf8');
   for(const asset of ['./index.html','./styles.css','./storage.js','./roster-parser.js','./ftl-engine.js','./app.js','./enhancements.js','./crewlink-sync.js']){
     assert.match(sw,new RegExp(asset.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
