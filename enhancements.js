@@ -1,4 +1,4 @@
-/* RosterHome v1.1.4
+/* RosterHome v1.1.5
  * Runtime source is split into small /enhancements-parts/*.txt files.
  * Cloudflare rebuilds dist/enhancements.js automatically.
  */

@@ -1,4 +1,4 @@
-# RosterHome v1.1.4 — iPhone Direct + Windows Bridge
+# RosterHome v1.1.5 — iPhone Direct + Windows Bridge
 
 Esta versión permite actualizar CrewLink directamente desde iPhone/Safari sin depender del PC.
 
@@ -259,3 +259,19 @@ Ahora RosterHome busca el PDF en:
 - `Hasta` arranca en el **último día seleccionable** (fin del mes actual + dos meses).
 - El backend valida la misma ventana.
 - Auto Sync usa esa misma ventana dinámica cada día: **hoy → último seleccionable**.
+
+
+## v1.1.5 — corrección de autenticación CrewLink
+
+El error `Timeout en iniciando sesión` no dependía del rango de fechas: ocurría
+antes de enviar las fechas a Individual Duty Plan.
+
+La autenticación ya no espera a que desaparezca el formulario de contraseña.
+CrewLink puede conservar/reconstruir ese formulario aunque el POST de login ya
+haya creado la sesión. Ahora RosterHome:
+
+1. envía el login,
+2. espera brevemente la navegación del POST,
+3. abre directamente Individual Duty Plan con las mismas cookies,
+4. considera el login correcto únicamente si aparece el formulario `makeReport`,
+5. identifica explícitamente si CrewLink devuelve otra vez la pantalla de login.

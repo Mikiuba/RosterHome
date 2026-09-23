@@ -1,4 +1,4 @@
-const CACHE='rosterhome-v1.1.4';
+const CACHE='rosterhome-v1.1.5';
 const CORE=[
   './',
   './index.html',

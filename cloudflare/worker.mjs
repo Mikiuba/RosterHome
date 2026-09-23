@@ -1,4 +1,4 @@
-const VERSION='1.1.4';
+const VERSION='1.1.5';
 const START='http://crewlink.corendonairlines.com:8090/crewlink/crewlink.jsp?crewlinkOperation=crewlinkForCrew&resetSession=Y';
 const DUTY='http://crewlink.corendonairlines.com:8090/crewlink/clApp?crewlinkService=individualDutyPlan&crewlinkOperation=default&crewlinkSourcePage=spCrew';
 const ORIGIN='http://crewlink.corendonairlines.com:8090';
@@ -247,7 +247,7 @@ async function acquireCdp(env){
     throw Error(`Cloudflare Browser Run respondió HTTP ${acquire.status}.`);
   }
   const info=await acquire.json();if(!info?.sessionId)throw Error('Cloudflare no devolvió una sesión de navegador.');
-  const upgrade=await env.BROWSER.fetch(`${host}/v1/devtools/browser/${encodeURIComponent(info.sessionId)}`,{headers:{Upgrade:'websocket','cf-brapi-client':'RosterHome/1.1.4'}});
+  const upgrade=await env.BROWSER.fetch(`${host}/v1/devtools/browser/${encodeURIComponent(info.sessionId)}`,{headers:{Upgrade:'websocket','cf-brapi-client':'RosterHome/1.1.5'}});
   if(!upgrade.webSocket)throw Error(`No se pudo abrir el canal de control del navegador remoto (HTTP ${upgrade.status}).`);
   const ws=upgrade.webSocket;ws.accept();const cdp=new CdpClient(ws);
   const {targetId}=await cdp.send('Target.createTarget',{url:'about:blank'});
@@ -383,12 +383,41 @@ async function browserSync(env,payload,progress){
 
     phase='iniciando sesión';
     progress(32,'Iniciando sesión en CrewLink…');
-    const loginExpr=`(()=>{const f=[...document.forms].find(x=>x.elements?.crewlinkPassword);if(!f)return {ok:false,reason:'No encuentro el formulario de acceso.'};const set=(n,v)=>{const e=f.elements[n];if(e)e.value=v;};set('crewlinkUserName',${JSON.stringify(payload.username)});set('crewlinkPassword',${JSON.stringify(payload.password)});const btn=[...f.elements].find(e=>e.type==='submit');if(btn)btn.click();else f.submit();return {ok:true};})()`;
-    await submitAndPoll(cdp,sessionId,loginExpr,`!document.querySelector('input[name="crewlinkPassword"]') && ![...document.forms].find(f=>f.elements?.crewlinkPassword)`,'el inicio de sesión de CrewLink',65000);
+    const loginExpr=`(()=>{const f=[...document.forms].find(x=>x.elements?.crewlinkPassword);if(!f)return {ok:false,reason:'No encuentro el formulario de acceso.'};const set=(n,v)=>{const e=f.elements[n];if(e)e.value=v;};set('crewlinkUserName',${JSON.stringify(payload.username)});set('crewlinkPassword',${JSON.stringify(payload.password)});const btn=[...f.elements].find(e=>e.type==='submit');if(btn&&f.requestSubmit)f.requestSubmit(btn);else if(btn)btn.click();else f.submit();return {ok:true};})()`;
+
+    // Do not wait for the password form to disappear. CrewLink can keep/rebuild
+    // that form while the authentication POST has already established the session.
+    // We only give the POST a short chance to navigate, then verify authentication
+    // by opening Individual Duty Plan with the same browser session/cookies.
+    const loginNavigation=cdp.waitEvent('Page.frameNavigated',sessionId,18000).catch(()=>null);
+    const loginResult=await evaluate(cdp,sessionId,loginExpr,15000);
+    if(!loginResult?.ok)throw Error(loginResult?.reason||'No se pudo enviar el formulario de acceso.');
+    await Promise.race([loginNavigation,new Promise(r=>setTimeout(r,3500))]);
+    await new Promise(r=>setTimeout(r,600));
 
     phase='abriendo Individual Duty Plan';
-    progress(48,'Abriendo Individual Duty Plan…');
-    await navigateUntil(cdp,sessionId,DUTY,`!![...document.forms].find(f=>f.elements?.crewlinkOperation?.value==='makeReport')`,'Individual Duty Plan',65000);
+    progress(48,'Comprobando sesión y abriendo Individual Duty Plan…');
+    const dutyNav=await cdp.send('Page.navigate',{url:DUTY},sessionId,15000);
+    if(dutyNav.errorText)throw Error(`No se pudo abrir Individual Duty Plan: ${dutyNav.errorText}`);
+
+    await waitUntil(cdp,sessionId,`(()=>{
+      const report=!![...document.forms].find(f=>f.elements?.crewlinkOperation?.value==='makeReport');
+      const login=!![...document.forms].find(f=>f.elements?.crewlinkPassword);
+      const text=(document.body?.innerText||'').replace(/\\s+/g,' ').trim();
+      return report||login||/invalid|incorrect|wrong password|login failed|authentication failed/i.test(text);
+    })()`,{timeout:60000,label:'la comprobación de sesión de CrewLink'});
+
+    const authState=await evaluate(cdp,sessionId,`(()=>{
+      const report=!![...document.forms].find(f=>f.elements?.crewlinkOperation?.value==='makeReport');
+      const login=!![...document.forms].find(f=>f.elements?.crewlinkPassword);
+      const text=(document.body?.innerText||'').replace(/\\s+/g,' ').trim();
+      return {report,login,text:text.slice(0,1200),url:location.href};
+    })()`,12000);
+
+    if(!authState?.report){
+      if(authState?.login)throw Error('CrewLink volvió a la pantalla de acceso. Revisa usuario y contraseña o la sesión del portal.');
+      throw Error('CrewLink no confirmó la sesión al abrir Individual Duty Plan.');
+    }
 
     phase='generando el roster';
     progress(64,'Generando el roster…');
