@@ -6,7 +6,7 @@ test('Auto Sync retries transient CrewLink failures and keeps activation enabled
   const worker=fs.readFileSync(new URL('../cloudflare/worker.mjs',import.meta.url),'utf8');
   const client=fs.readFileSync(new URL('../auto-sync.js',import.meta.url),'utf8');
   assert.match(worker,/for\(let tryNo=1;tryNo<=2;tryNo\+\+\)/);
-  assert.match(worker,/submitWithoutLoadWait/);
+  assert.match(worker,/reportViaFetchExpr/);
   assert.match(worker,/setTimeout\(r,1800\)/);
   assert.match(client,/Auto Sync está activado/);
   assert.match(client,/Se reintentará automáticamente mañana/);

@@ -1,4 +1,4 @@
-# RosterHome v1.1.5 — iPhone Direct + Windows Bridge
+# RosterHome v1.1.6 — iPhone Direct + Windows Bridge
 
 Esta versión permite actualizar CrewLink directamente desde iPhone/Safari sin depender del PC.
 
@@ -275,3 +275,29 @@ haya creado la sesión. Ahora RosterHome:
 3. abre directamente Individual Duty Plan con las mismas cookies,
 4. considera el login correcto únicamente si aparece el formulario `makeReport`,
 5. identifica explícitamente si CrewLink devuelve otra vez la pantalla de login.
+
+
+## v1.1.6 — generación del roster reproducida desde el HAR que funciona
+
+Se revisó el HAR real de CrewLink. El flujo correcto hace:
+
+`POST /crewlink/clApp`
+
+con exactamente:
+- `crewlinkService=individualDutyPlan`
+- `crewlinkOperation=makeReport`
+- `buddyName`
+- `beginDate`
+- `endDate`
+
+La respuesta tarda varios segundos y ya contiene un `iframe` con
+`viewer.html?file=/crewlink/temp/...pdf`.
+
+El timeout de v1.1.5 ocurría porque el Worker hacía click en el formulario
+dentro de `Runtime.evaluate`; al navegar la página, Chrome podía destruir el
+contexto antes de que CDP devolviera el resultado.
+
+v1.1.6 replica el POST directamente con `fetch()` dentro del navegador
+autenticado, mantiene las cookies de CrewLink, lee el HTML de respuesta y
+extrae la URL del PDF sin navegar. El submit tradicional queda únicamente
+como fallback y se difiere 250 ms para evitar la misma carrera.

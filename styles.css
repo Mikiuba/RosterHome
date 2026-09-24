@@ -735,7 +735,7 @@ html[data-connectivity="offline"] .cl-progress{
 
 
 /* =========================================================
-   RosterHome v1.1.5 · Calendar export
+   RosterHome v1.1.6 · Calendar export
    ========================================================= */
 .calendar-export-card{
   margin-top:16px;
@@ -795,7 +795,7 @@ html[data-connectivity="offline"] .cl-progress{
 .auto-sync-row>div{display:flex;flex-direction:column;gap:2px}.auto-sync-row span,.auto-sync-row small{font-size:11px;color:var(--muted)}
 @media(max-width:620px){.auto-sync-row{display:grid}.auto-sync-grid{grid-template-columns:1fr!important}}
 
-/* v1.1.5 · Auto Sync status readability */
+/* v1.1.6 · Auto Sync status readability */
 .auto-sync-row>div{min-width:0}
 .auto-sync-row b,.auto-sync-row span,.auto-sync-row small{display:block;overflow-wrap:anywhere;word-break:normal}
 .auto-sync-row small{margin-top:4px;line-height:1.35}
