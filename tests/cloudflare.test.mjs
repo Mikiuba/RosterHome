@@ -7,7 +7,7 @@ test('worker status advertises hybrid cloud-browser import', async()=>{
   const r=await worker.fetch(new Request('https://example.test/api/crewlink/status'),env);
   assert.equal(r.status,200);
   const j=await r.json();
-  assert.equal(j.version,'1.1.7');
+  assert.equal(j.version,'1.1.8');
   assert.equal(j.transport,'cloud-browser+local-bridge');
   assert.equal(j.mode,'hybrid');
   assert.equal(j.cloudBrowser,true);

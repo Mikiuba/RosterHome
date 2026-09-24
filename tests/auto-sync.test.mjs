@@ -2,13 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-test('v1.1.7 exposes daily CrewLink Auto Sync UI',()=>{
+test('v1.1.8 exposes daily CrewLink Auto Sync UI',()=>{
   const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
   const js=fs.readFileSync(new URL('../auto-sync.js',import.meta.url),'utf8');
   assert.match(html,/id="autoSyncEnable"/);
   assert.match(html,/id="autoSyncRun"/);
   assert.match(html,/id="autoSyncDisable"/);
-  assert.match(html,/auto-sync\.js\?v=1\.1\.7/);
+  assert.match(html,/auto-sync\.js\?v=1\.1\.8/);
   assert.match(js,/\/api\/autosync\/config/);
   assert.match(js,/\/api\/autosync\/run/);
   assert.match(js,/\/api\/autosync\/roster/);
@@ -24,7 +24,7 @@ test('worker has encrypted daily scheduled sync and keeps previous roster on fai
   assert.match(worker,/AES-GCM/);
   assert.match(worker,/sealCredentials/);
   assert.match(worker,/openCredentials/);
-  assert.match(worker,/RosterParser\.parseCrewLinkText/);
+  assert.match(worker,/RosterParserRuntime\.parseCrewLinkText/);
   assert.match(worker,/PDFJS_URL/);
   assert.match(worker,/last roster válido|último roster válido/i);
 });

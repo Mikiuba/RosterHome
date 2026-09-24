@@ -1,4 +1,5 @@
-const VERSION='1.1.7';
+import * as RosterParserRuntime from './roster-parser-runtime.mjs';
+const VERSION='1.1.8';
 const START='http://crewlink.corendonairlines.com:8090/crewlink/crewlink.jsp?crewlinkOperation=crewlinkForCrew&resetSession=Y';
 const DUTY='http://crewlink.corendonairlines.com:8090/crewlink/clApp?crewlinkService=individualDutyPlan&crewlinkOperation=default&crewlinkSourcePage=spCrew';
 const ORIGIN='http://crewlink.corendonairlines.com:8090';
@@ -240,7 +241,7 @@ async function acquireCdp(env){
     throw Error(`Cloudflare Browser Run respondió HTTP ${acquire.status}.`);
   }
   const info=await acquire.json();if(!info?.sessionId)throw Error('Cloudflare no devolvió una sesión de navegador.');
-  const upgrade=await env.BROWSER.fetch(`${host}/v1/devtools/browser/${encodeURIComponent(info.sessionId)}`,{headers:{Upgrade:'websocket','cf-brapi-client':'RosterHome/1.1.7'}});
+  const upgrade=await env.BROWSER.fetch(`${host}/v1/devtools/browser/${encodeURIComponent(info.sessionId)}`,{headers:{Upgrade:'websocket','cf-brapi-client':'RosterHome/1.1.8'}});
   if(!upgrade.webSocket)throw Error(`No se pudo abrir el canal de control del navegador remoto (HTTP ${upgrade.status}).`);
   const ws=upgrade.webSocket;ws.accept();const cdp=new CdpClient(ws);
   const {targetId}=await cdp.send('Target.createTarget',{url:'about:blank'});
@@ -267,7 +268,11 @@ async function navigateUntil(cdp,sessionId,url,predicate,label,timeout=65000){
 }
 async function evaluate(cdp,sessionId,expression,timeout=45000){
   const r=await cdp.send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true,userGesture:true},sessionId,timeout);
-  if(r.exceptionDetails)throw Error(r.exceptionDetails.text||r.exceptionDetails.exception?.description||'Error ejecutando CrewLink.');return r.result?.value;
+  if(r.exceptionDetails){
+    const detail=r.exceptionDetails.exception?.description||r.exceptionDetails.exception?.value||r.exceptionDetails.text||'Error ejecutando CrewLink.';
+    throw Error(String(detail));
+  }
+  return r.result?.value;
 }
 async function submitAndPoll(cdp,sessionId,expression,predicate,label,timeout=65000){
   const result=await evaluate(cdp,sessionId,expression,12000);
@@ -546,22 +551,102 @@ async function browserSync(env,payload,progress){
   }
 }
 
-async function parserAssetSource(env){
-  const r=await env.ASSETS.fetch(new Request('https://rosterhome-assets.invalid/roster-parser.js'));
-  if(!r.ok)throw Error('No se pudo cargar el parser de roster del deployment.');return r.text();
+
+function operationalEventsFromParsed(parsed,{profileName='',briefingLead=105}={}){
+  const addDays=(d,n)=>new Date(d.getTime()+Number(n||0)*86400000);
+  const dp=d=>({y:d.getUTCFullYear(),m:d.getUTCMonth()+1,d:d.getUTCDate()});
+  const tp=v=>{const s=String(v||'').replace(':','').padStart(4,'0');return {h:+s.slice(0,2),min:+s.slice(2,4)};};
+  const off=(date,tz)=>{
+    const ps=new Intl.DateTimeFormat('en-US',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(date);
+    const o=Object.fromEntries(ps.map(p=>[p.type,p.value]));
+    return Date.UTC(+o.year,+o.month-1,+o.day,+o.hour,+o.minute,+o.second)-date.getTime();
+  };
+  const zoned=(y,m,d,h,mi,tz)=>{
+    let g=new Date(Date.UTC(y,m-1,d,h,mi,0)),a=off(g,tz);
+    g=new Date(g.getTime()-a);
+    const b=off(g,tz);
+    if(a!==b)g=new Date(Date.UTC(y,m-1,d,h,mi,0)-b);
+    return g;
+  };
+  const wall=(date,hhmm,tz)=>{
+    const a=dp(date),b=tp(hhmm);
+    return tz==='UTC'?new Date(Date.UTC(a.y,a.m-1,a.d,b.h,b.min,0)):zoned(a.y,a.m,a.d,b.h,b.min,tz);
+  };
+  const instants=duty=>{
+    if(duty?.kind!=='duty'||duty.serviceType!=='flight'||!(duty.flights||[]).length)return [];
+    const key=duty.sourceCheckInDate||duty.date;
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(String(key||'')))return [];
+    const base=new Date(key+'T00:00:00Z');
+    let prev=null,out=[];
+    for(const f of duty.flights){
+      let dd=addDays(base,f.depDayOffset||0),ad=addDays(base,f.arrDayOffset||0);
+      const dz=duty.timeBasis==='local_event'?(RosterParserRuntime.airportTimeZone(f.dep)||'UTC'):'UTC';
+      const az=duty.timeBasis==='local_event'?(RosterParserRuntime.airportTimeZone(f.arr)||'UTC'):'UTC';
+      let start=wall(dd,f.depTime,dz);
+      while(prev&&start<prev){dd=addDays(dd,1);start=wall(dd,f.depTime,dz);}
+      let end=wall(ad,f.arrTime,az);
+      while(end<=start){ad=addDays(ad,1);end=wall(ad,f.arrTime,az);}
+      out.push({flight:f,start,end});prev=end;
+    }
+    return out;
+  };
+
+  const flights=[],briefings=[],lead=Number(briefingLead)||105,person=String(profileName||'');
+  for(const d of parsed?.duties||[]){
+    const xs=instants(d);if(!xs.length)continue;
+    const first=xs[0],bs=new Date(first.start.getTime()-lead*60000);
+    briefings.push({
+      uid:['briefing',d.date,d.route,bs.toISOString()].join('.').replace(/[^A-Za-z0-9.@_-]/g,'-')+'@rosterhome.local',
+      start:bs.toISOString(),
+      end:new Date(bs.getTime()+15*60000).toISOString(),
+      summary:'Briefing · '+(d.route||first.flight.dep+'–'+first.flight.arr),
+      description:person+' · '+lead+' min antes del primer vuelo',
+      location:d.base||first.flight.dep||''
+    });
+    for(const x of xs){
+      const f=x.flight,no=(f.carrier||'')+(f.number||'');
+      flights.push({
+        uid:['flight',d.date,no,f.dep,f.arr,x.start.toISOString()].join('.').replace(/[^A-Za-z0-9.@_-]/g,'-')+'@rosterhome.local',
+        start:x.start.toISOString(),
+        end:x.end.toISOString(),
+        summary:(no||'Vuelo')+' · '+f.dep+' → '+f.arr,
+        description:person+(d.route?' · duty '+d.route:'')+(f.aircraft?' · '+f.aircraft:''),
+        location:f.dep+' → '+f.arr
+      });
+    }
+  }
+  return {briefings,flights};
 }
+
 async function parsePdfForAutoSync(env,pdfBase64,{profileName='',briefingLead=105}={}){
+  // Browser Run is used only for PDF.js text extraction. Parsing itself happens
+  // in the Worker with a statically bundled parser, eliminating the remote
+  // `Runtime.evaluate(parserSource)` failure that surfaced as "Parser remoto: Uncaught".
   const {cdp,sessionId}=await acquireCdp(env);
+  let text;
   try{
     const loaded=await evaluate(cdp,sessionId,`(async()=>{if(window.pdfjsLib)return true;await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=${JSON.stringify(PDFJS_URL)};s.onload=resolve;s.onerror=()=>reject(new Error('No se pudo cargar PDF.js'));document.head.appendChild(s);});return !!window.pdfjsLib;})()`,45000);
     if(!loaded)throw Error('No se pudo inicializar el lector PDF remoto.');
     const extractExpr=`(async()=>{const bin=atob(${JSON.stringify(pdfBase64)}),data=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)data[i]=bin.charCodeAt(i);const pdf=await pdfjsLib.getDocument({data,disableWorker:true}).promise;let out='';for(let p=1;p<=pdf.numPages;p++){const page=await pdf.getPage(p),viewport=page.getViewport({scale:1}),tc=await page.getTextContent();const items=tc.items.filter(i=>i.str&&i.str.trim()).map(i=>{const t=pdfjsLib.Util.transform(viewport.transform,i.transform),width=Number(i.width||0);return {str:i.str.trim(),x:t[4],cx:t[4]+width/2,y:t[5]};});const mid=viewport.width*.5;const build=xs=>{const rows=[];xs.sort((a,b)=>a.y-b.y||a.x-b.x);for(const it of xs){let row=rows.find(r=>Math.abs(r.y-it.y)<2.4);if(!row){row={y:it.y,items:[]};rows.push(row);}row.items.push(it);}rows.sort((a,b)=>a.y-b.y);return rows.map(r=>r.items.sort((a,b)=>a.x-b.x).map(x=>x.str).join(' ')).join('\\n');};out+='\\n'+build([...items]).split('\\n').filter(line=>/Local\\s+times\\s+at\\s+event\\s+airport|Individual duty plan|^Period:/i.test(line)).join('\\n')+'\\n';out+='\\n[[PAGE '+p+' LEFT]]\\n'+build(items.filter(i=>i.cx<mid))+'\\n[[PAGE '+p+' RIGHT]]\\n'+build(items.filter(i=>i.cx>=mid));}return out;})()`;
-    const text=await evaluate(cdp,sessionId,extractExpr,120000);if(!text||text.length<100)throw Error('El PDF de CrewLink no contiene texto utilizable.');
-    const parserSource=await parserAssetSource(env);await evaluate(cdp,sessionId,parserSource+'\\n;!!globalThis.RosterParser',30000);
-    const buildExpr=`(()=>{const parsed=RosterParser.parseCrewLinkText(${JSON.stringify(text)});const addDays=(d,n)=>new Date(d.getTime()+Number(n||0)*86400000);const dp=d=>({y:d.getUTCFullYear(),m:d.getUTCMonth()+1,d:d.getUTCDate()});const tp=v=>{const s=String(v||'').replace(':','').padStart(4,'0');return {h:+s.slice(0,2),min:+s.slice(2,4)}};const off=(date,tz)=>{const ps=new Intl.DateTimeFormat('en-US',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(date),o=Object.fromEntries(ps.map(p=>[p.type,p.value]));return Date.UTC(+o.year,+o.month-1,+o.day,+o.hour,+o.minute,+o.second)-date.getTime()};const zoned=(y,m,d,h,mi,tz)=>{let g=new Date(Date.UTC(y,m-1,d,h,mi,0)),a=off(g,tz);g=new Date(g.getTime()-a);const b=off(g,tz);if(a!==b)g=new Date(Date.UTC(y,m-1,d,h,mi,0)-b);return g};const wall=(date,hhmm,tz)=>{const a=dp(date),b=tp(hhmm);return tz==='UTC'?new Date(Date.UTC(a.y,a.m-1,a.d,b.h,b.min,0)):zoned(a.y,a.m,a.d,b.h,b.min,tz)};const instants=duty=>{if(duty?.kind!=='duty'||duty.serviceType!=='flight'||!(duty.flights||[]).length)return [];const key=duty.sourceCheckInDate||duty.date;if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(String(key||'')))return [];const base=new Date(key+'T00:00:00Z');let prev=null,out=[];for(const f of duty.flights){let dd=addDays(base,f.depDayOffset||0),ad=addDays(base,f.arrDayOffset||0),dz=duty.timeBasis==='local_event'?(RosterParser.airportTimeZone(f.dep)||'UTC'):'UTC',az=duty.timeBasis==='local_event'?(RosterParser.airportTimeZone(f.arr)||'UTC'):'UTC',start=wall(dd,f.depTime,dz);while(prev&&start<prev){dd=addDays(dd,1);start=wall(dd,f.depTime,dz)}let end=wall(ad,f.arrTime,az);while(end<=start){ad=addDays(ad,1);end=wall(ad,f.arrTime,az)}out.push({flight:f,start,end});prev=end;}return out};const flights=[],briefings=[],lead=${Number(briefingLead)||105},person=${JSON.stringify(profileName)};for(const d of parsed.duties||[]){const xs=instants(d);if(!xs.length)continue;const first=xs[0],bs=new Date(first.start.getTime()-lead*60000);briefings.push({uid:['briefing',d.date,d.route,bs.toISOString()].join('.').replace(/[^A-Za-z0-9.@_-]/g,'-')+'@rosterhome.local',start:bs.toISOString(),end:new Date(bs.getTime()+15*60000).toISOString(),summary:'Briefing · '+(d.route||first.flight.dep+'–'+first.flight.arr),description:person+' · '+lead+' min antes del primer vuelo',location:d.base||first.flight.dep||''});for(const x of xs){const f=x.flight,no=(f.carrier||'')+(f.number||'');flights.push({uid:['flight',d.date,no,f.dep,f.arr,x.start.toISOString()].join('.').replace(/[^A-Za-z0-9.@_-]/g,'-')+'@rosterhome.local',start:x.start.toISOString(),end:x.end.toISOString(),summary:(no||'Vuelo')+' · '+f.dep+' → '+f.arr,description:person+(d.route?' · duty '+d.route:'')+(f.aircraft?' · '+f.aircraft:''),location:f.dep+' → '+f.arr});}}return JSON.stringify({parsed,briefings,flights});})()`;
-    const packed=await evaluate(cdp,sessionId,buildExpr,90000);if(!packed)throw Error('El parser remoto no devolvió datos.');return JSON.parse(packed);
-  }finally{try{await cdp.send('Browser.close',{},null,3000);}catch{}cdp.close();}
+    text=await evaluate(cdp,sessionId,extractExpr,120000);
+    if(!text||text.length<100)throw Error('El PDF de CrewLink no contiene texto utilizable.');
+  }finally{
+    try{await cdp.send('Browser.close',{},null,3000);}catch{}
+    cdp.close();
+  }
+
+  let parsed;
+  try{
+    parsed=RosterParserRuntime.parseCrewLinkText(text);
+  }catch(error){
+    throw Error('Parser local: '+String(error?.stack||error?.message||error));
+  }
+  if(!parsed||!Array.isArray(parsed.duties))throw Error('Parser local no devolvió un roster válido.');
+
+  const {briefings,flights}=operationalEventsFromParsed(parsed,{profileName,briefingLead});
+  return {parsed,briefings,flights};
 }
+
 function registryStub(env){const id=env.CALENDAR_STORE.idFromName(AUTO_REGISTRY_ID);return env.CALENDAR_STORE.get(id);}
 async function registryAdd(env,token){return registryStub(env).fetch('https://calendar-store/registry/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});}
 async function registryRemove(env,token){return registryStub(env).fetch('https://calendar-store/registry/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});}
@@ -580,7 +665,7 @@ async function runAutoSyncProfile(env,token,profile){
       const range=sync.range;
       let processed;
       try{processed=await parsePdfForAutoSync(env,sync.pdfBase64,{profileName:job.name||job.crewCode,briefingLead:job.briefingLead});}
-      catch(error){throw Error('Parser remoto: '+String(error?.message||error));}
+      catch(error){throw Error('Parser: '+String(error?.message||error));}
       const parsed=processed.parsed;
       if(parsed?.crew?.crewCode?.toUpperCase()!==username)throw Error('CrewLink devolvió un roster de otro usuario.');
       if(!parsed?.coverage?.complete)throw Error('El roster diario no reconcilia sus totales; se conserva el último roster válido.');

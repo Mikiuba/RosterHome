@@ -1,4 +1,4 @@
-# RosterHome v1.1.7 — iPhone Direct + Windows Bridge
+# RosterHome v1.1.8 — iPhone Direct + Windows Bridge
 
 Esta versión permite actualizar CrewLink directamente desde iPhone/Safari sin depender del PC.
 
@@ -325,3 +325,22 @@ Desde v1.1.7:
 - Guarda en `lastRange` el rango real usado.
 - La importación manual también deja de inventar un máximo local; CrewLink valida
   el límite real después del login.
+
+
+## v1.1.8 — parser de Auto Sync fuera de Browser Run
+
+La v1.1.7 ya llega a descargar el PDF: el nuevo error `Parser remoto: Uncaught`
+demuestra que el fallo estaba después de CrewLink, al intentar inyectar
+`roster-parser.js` mediante CDP dentro de una segunda sesión de navegador.
+
+v1.1.8 elimina esa arquitectura:
+
+1. Browser Run abre PDF.js únicamente para extraer el texto del PDF.
+2. La sesión de navegador se cierra.
+3. El Worker ejecuta un módulo ESM estático (`cloudflare/roster-parser-runtime.mjs`)
+   con la misma lógica de parsing que usa la app.
+4. Briefings y vuelos se generan también en el Worker.
+
+Esto elimina una sesión de ejecución JavaScript remota del camino crítico y
+evita el error opaco `Uncaught`. Además, los errores CDP ahora conservan la
+descripción real de la excepción.
