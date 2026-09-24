@@ -1,4 +1,4 @@
-# RosterHome v1.1.6 — iPhone Direct + Windows Bridge
+# RosterHome v1.1.7 — iPhone Direct + Windows Bridge
 
 Esta versión permite actualizar CrewLink directamente desde iPhone/Safari sin depender del PC.
 
@@ -301,3 +301,27 @@ v1.1.6 replica el POST directamente con `fetch()` dentro del navegador
 autenticado, mantiene las cookies de CrewLink, lee el HTML de respuesta y
 extrae la URL del PDF sin navegar. El submit tradicional queda únicamente
 como fallback y se difiere 250 ms para evitar la misma carrera.
+
+
+## v1.1.7 — Auto Sync usa el rango REAL publicado por CrewLink
+
+Se revisó el HAR original del portal. En la pantalla Individual Duty Plan,
+CrewLink ya entrega los límites correctos dentro del propio formulario:
+
+- `beginDate` = fecha inicial disponible (en el HAR: `13Sep26`)
+- `endDate` = último día seleccionable (en el HAR: `30Sep26`)
+
+Además, el JavaScript del portal marcaba explícitamente `2026-10-01` como
+`maxDatePlus1`, confirmando que el último día válido era `30Sep26`.
+
+RosterHome estaba sustituyendo ese límite por una estimación local
+`mes actual + 2 meses`, lo que podía pedir fechas que CrewLink todavía no había
+publicado. Al saltarnos la validación JavaScript del portal, el servidor podía
+quedarse sin generar un PDF y Auto Sync terminaba en `Timeout en esperando el PDF`.
+
+Desde v1.1.7:
+- Auto Sync lee `beginDate` y `endDate` directamente del formulario de CrewLink.
+- Usa exactamente ese rango para `makeReport`.
+- Guarda en `lastRange` el rango real usado.
+- La importación manual también deja de inventar un máximo local; CrewLink valida
+  el límite real después del login.

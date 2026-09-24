@@ -1,4 +1,4 @@
-/* RosterHome v1.1.6 · standalone calendar exporter
+/* RosterHome v1.1.7 · standalone calendar exporter
  * Kept separate from enhancements.js so GitHub/iPhone cache issues cannot leave
  * the buttons visible without the export logic.
  */

@@ -1,4 +1,4 @@
-const VERSION='1.1.6';
+const VERSION='1.1.7';
 const START='http://crewlink.corendonairlines.com:8090/crewlink/crewlink.jsp?crewlinkOperation=crewlinkForCrew&resetSession=Y';
 const DUTY='http://crewlink.corendonairlines.com:8090/crewlink/clApp?crewlinkService=individualDutyPlan&crewlinkOperation=default&crewlinkSourcePage=spCrew';
 const ORIGIN='http://crewlink.corendonairlines.com:8090';
@@ -21,16 +21,12 @@ function dateForm(value){
   const d=new Date(value+'T00:00:00Z');if(!Number.isFinite(+d))throw Error('Fecha inválida.');
   return `${String(d.getUTCDate()).padStart(2,'0')}${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getUTCMonth()]}${String(d.getUTCFullYear()).slice(-2)}`;
 }
-function crewlinkSelectableRange(now=new Date()){
-  const start=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()));
-  const end=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth()+3,0));
-  return {start:start.toISOString().slice(0,10),end:end.toISOString().slice(0,10)};
-}
 function validatePayload(payload){
   if(!payload||!/^[a-z0-9]{2,16}$/i.test(payload.username||'')||typeof payload.password!=='string'||!payload.password||payload.password.length>256)throw Error('Completa usuario y contraseña.');
-  const a=new Date(payload.start+'T00:00:00Z'),b=new Date(payload.end+'T00:00:00Z'),allowed=crewlinkSelectableRange();
-  if(!Number.isFinite(+a)||!Number.isFinite(+b)||b<a||payload.start<allowed.start||payload.end>allowed.end)
-    throw Error(`Selecciona un periodo entre ${allowed.start} y ${allowed.end}.`);
+  if(payload.useCrewlinkWindow===true)return;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(String(payload.start||''))||!/^\d{4}-\d{2}-\d{2}$/.test(String(payload.end||'')))throw Error('Selecciona un periodo válido.');
+  const a=new Date(payload.start+'T00:00:00Z'),b=new Date(payload.end+'T00:00:00Z');
+  if(!Number.isFinite(+a)||!Number.isFinite(+b)||b<a||(b-a)/86400000>366)throw Error('Selecciona un periodo válido.');
 }
 function safeCrewlinkError(error){
   const message=String(error?.message||error||'No se pudo completar CrewLink.').replace(/\s+/g,' ').trim();
@@ -86,9 +82,6 @@ async function openCredentials(secret,value){
   const key=await credentialKey(secret),iv=b64ToBytes(parts[1]),encrypted=b64ToBytes(parts[2]);
   const clear=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,encrypted);
   return JSON.parse(new TextDecoder().decode(clear));
-}
-function autoRange(now=new Date()){
-  return crewlinkSelectableRange(now);
 }
 function icsEscape(value){return String(value??'').replace(/\\/g,'\\\\').replace(/\r?\n/g,'\\n').replace(/,/g,'\\,').replace(/;/g,'\\;');}
 function icsStamp(value){return new Date(value).toISOString().replace(/[-:]/g,'').replace(/\.\d{3}/,'');}
@@ -247,7 +240,7 @@ async function acquireCdp(env){
     throw Error(`Cloudflare Browser Run respondió HTTP ${acquire.status}.`);
   }
   const info=await acquire.json();if(!info?.sessionId)throw Error('Cloudflare no devolvió una sesión de navegador.');
-  const upgrade=await env.BROWSER.fetch(`${host}/v1/devtools/browser/${encodeURIComponent(info.sessionId)}`,{headers:{Upgrade:'websocket','cf-brapi-client':'RosterHome/1.1.6'}});
+  const upgrade=await env.BROWSER.fetch(`${host}/v1/devtools/browser/${encodeURIComponent(info.sessionId)}`,{headers:{Upgrade:'websocket','cf-brapi-client':'RosterHome/1.1.7'}});
   if(!upgrade.webSocket)throw Error(`No se pudo abrir el canal de control del navegador remoto (HTTP ${upgrade.status}).`);
   const ws=upgrade.webSocket;ws.accept();const cdp=new CdpClient(ws);
   const {targetId}=await cdp.send('Target.createTarget',{url:'about:blank'});
@@ -374,6 +367,18 @@ async function locateCrewlinkPdf(cdp,sessionId){
   return null;
 }
 
+
+function crewlinkDateToIso(value){
+  const m=String(value||'').trim().match(/^(\d{2})([A-Za-z]{3})(\d{2})$/);
+  if(!m)return null;
+  const months={Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
+  const key=m[2][0].toUpperCase()+m[2].slice(1).toLowerCase(),month=months[key];
+  if(!month)return null;
+  const year=2000+Number(m[3]),day=Number(m[1]);
+  const d=new Date(Date.UTC(year,month-1,day));
+  if(d.getUTCFullYear()!==year||d.getUTCMonth()+1!==month||d.getUTCDate()!==day)return null;
+  return `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+}
 async function browserSync(env,payload,progress){
   validatePayload(payload);let phase='inicializando Browser Run';progress(8,'Iniciando navegador seguro en Cloudflare…');const {cdp,sessionId}=await acquireCdp(env);
   try{
@@ -419,6 +424,34 @@ async function browserSync(env,payload,progress){
       throw Error('CrewLink no confirmó la sesión al abrir Individual Duty Plan.');
     }
 
+    // CrewLink itself publishes the valid selectable window in the report form.
+    // In the working HAR, for example, beginDate was the current day and endDate
+    // was the actual last selectable roster date. Do not guess this range locally.
+    const crewlinkWindow=await evaluate(cdp,sessionId,`(()=>{
+      const f=[...document.forms].find(x=>x.elements?.crewlinkOperation?.value==='makeReport');
+      if(!f)return null;
+      return {
+        begin:String(f.elements?.beginDate?.value||'').trim(),
+        end:String(f.elements?.endDate?.value||'').trim()
+      };
+    })()`,12000);
+    const availableStart=crewlinkDateToIso(crewlinkWindow?.begin);
+    const availableEnd=crewlinkDateToIso(crewlinkWindow?.end);
+    if(!availableStart||!availableEnd)throw Error('CrewLink no publicó correctamente su periodo seleccionable.');
+
+    let selectedStart,selectedEnd;
+    if(payload.useCrewlinkWindow===true){
+      selectedStart=availableStart;
+      selectedEnd=availableEnd;
+    }else{
+      selectedStart=String(payload.start||'');
+      selectedEnd=String(payload.end||'');
+      if(selectedStart<availableStart||selectedEnd>availableEnd||selectedEnd<selectedStart){
+        throw Error(`CrewLink permite actualmente ${availableStart} → ${availableEnd}.`);
+      }
+    }
+    const selectedRange={start:selectedStart,end:selectedEnd};
+
     phase='generando el roster';
     progress(64,'Generando el roster en CrewLink…');
 
@@ -435,8 +468,8 @@ async function browserSync(env,payload,progress){
       body.set('crewlinkService','individualDutyPlan');
       body.set('crewlinkOperation','makeReport');
       body.set('buddyName','');
-      body.set('beginDate',${JSON.stringify(dateForm(payload.start))});
-      body.set('endDate',${JSON.stringify(dateForm(payload.end))});
+      body.set('beginDate',${JSON.stringify(dateForm(selectedRange.start))});
+      body.set('endDate',${JSON.stringify(dateForm(selectedRange.end))});
 
       const response=await fetch('clApp',{
         method:'POST',
@@ -481,7 +514,7 @@ async function browserSync(env,payload,progress){
       // Runtime.evaluate has returned so the navigation cannot destroy the CDP
       // execution context before we receive the result.
       progress(69,'CrewLink requiere navegación; usando el formulario original…');
-      const reportExpr=`(()=>{const f=[...document.forms].find(x=>x.elements?.crewlinkOperation?.value==='makeReport');if(!f)return {ok:false,reason:'No encuentro el formulario de Individual Duty Plan.'};const set=(n,v)=>{const el=f.elements[n];if(el)el.value=v;};set('buddyName','');set('beginDate',${JSON.stringify(dateForm(payload.start))});set('endDate',${JSON.stringify(dateForm(payload.end))});const btn=f.elements.selectBtn||[...f.elements].find(el=>el.type==='submit');setTimeout(()=>{try{if(btn&&f.requestSubmit)f.requestSubmit(btn);else if(btn)btn.click();else f.submit();}catch{try{f.submit();}catch{}}},250);return {ok:true};})()`;
+      const reportExpr=`(()=>{const f=[...document.forms].find(x=>x.elements?.crewlinkOperation?.value==='makeReport');if(!f)return {ok:false,reason:'No encuentro el formulario de Individual Duty Plan.'};const set=(n,v)=>{const el=f.elements[n];if(el)el.value=v;};set('buddyName','');set('beginDate',${JSON.stringify(dateForm(selectedRange.start))});set('endDate',${JSON.stringify(dateForm(selectedRange.end))});const btn=f.elements.selectBtn||[...f.elements].find(el=>el.type==='submit');setTimeout(()=>{try{if(btn&&f.requestSubmit)f.requestSubmit(btn);else if(btn)btn.click();else f.submit();}catch{try{f.submit();}catch{}}},250);return {ok:true};})()`;
       const reportNavigation=cdp.waitEvent('Page.frameNavigated',sessionId,70000).catch(()=>null);
       const reportResult=await evaluate(cdp,sessionId,reportExpr,12000);
       if(!reportResult?.ok)throw Error(reportResult?.reason||String(primaryError?.message||primaryError));
@@ -503,7 +536,7 @@ async function browserSync(env,payload,progress){
     const pdfBase64=await evaluate(cdp,sessionId,fetchExpr,60000);
     if(!pdfBase64)throw Error('CrewLink no devolvió el PDF.');
     progress(91,'PDF recibido. Enviándolo a RosterHome…');
-    return {pdfBase64};
+    return {pdfBase64,range:selectedRange,availableRange:{start:availableStart,end:availableEnd}};
   }catch(error){
     throw Error(`${phase}: ${String(error?.message||error)}`);
   }finally{
@@ -536,14 +569,15 @@ async function tokenStore(env,token){const id=env.CALENDAR_STORE.idFromName(toke
 async function runAutoSyncProfile(env,token,profile){
   const stub=await tokenStore(env,token),jobsData=await (await stub.fetch('https://calendar-store/autosync/jobs')).json(),job=jobsData.jobs?.[String(profile)];
   if(!job?.enabled)return {ok:false,skipped:true};
-  const range=autoRange(),attempt=new Date().toISOString();
+  const attempt=new Date().toISOString();
   let lastError=null;
   for(let tryNo=1;tryNo<=2;tryNo++){
     try{
       const creds=await openCredentials(env.ROSTERHOME_ACCESS_KEY,job.encryptedCredentials),username=String(creds.username||'').toUpperCase();
       let sync;
-      try{sync=await browserSync(env,{username:creds.username,password:creds.password,start:range.start,end:range.end},()=>{});}
+      try{sync=await browserSync(env,{username:creds.username,password:creds.password,useCrewlinkWindow:true},()=>{});}
       catch(error){throw Error('CrewLink: '+String(error?.message||error));}
+      const range=sync.range;
       let processed;
       try{processed=await parsePdfForAutoSync(env,sync.pdfBase64,{profileName:job.name||job.crewCode,briefingLead:job.briefingLead});}
       catch(error){throw Error('Parser remoto: '+String(error?.message||error));}

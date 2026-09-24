@@ -1,4 +1,4 @@
-/* RosterHome v1.1.6 — Hybrid CrewLink import.
+/* RosterHome v1.1.7 — Hybrid CrewLink import.
  * Desktop Chrome: uses the local RosterHome Bridge when present.
  * iPhone/Safari or any browser without the extension: uses a temporary Cloudflare Browser Run session.
  */
@@ -40,18 +40,12 @@
   function localDateKey(d){
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   }
-  function crewlinkSelectableWindow(now=new Date()){
-    const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
-    const last=new Date(now.getFullYear(),now.getMonth()+3,0);
-    return {min:localDateKey(today),max:localDateKey(last)};
-  }
-  const selectable=crewlinkSelectableWindow();
-  $('clStart').min=selectable.min;$('clStart').max=selectable.max;
-  $('clEnd').min=selectable.min;$('clEnd').max=selectable.max;
-  $('clStart').value=selectable.min;$('clEnd').value=selectable.max;
-  $('clDateWindow').textContent=`Periodo disponible: hoy (${selectable.min}) → ${selectable.max}.`;
+  const todayKey=localDateKey(new Date());
+  $('clStart').min=todayKey;$('clEnd').min=todayKey;
+  $('clStart').value=todayKey;$('clEnd').value=todayKey;
+  $('clDateWindow').textContent='CrewLink validará el último día realmente disponible al iniciar sesión.';
   $('clStart').addEventListener('change',()=>{
-    const start=$('clStart').value||selectable.min;
+    const start=$('clStart').value||todayKey;
     $('clEnd').min=start;
     if($('clEnd').value<start)$('clEnd').value=start;
   });
@@ -165,9 +159,8 @@
   $('clForm').addEventListener('submit',async event=>{
     event.preventDefault();if(busy||!$('clHttp').checked)return;
     const person=Number($('clPerson').value),input=$('file'+person),start=$('clStart').value,end=$('clEnd').value,username=$('clUser').value.trim(),password=$('clPassword').value;
-    const windowNow=crewlinkSelectableWindow();
-    if(!start||!end||start<windowNow.min||end>windowNow.max||end<start){
-      $('clResult').textContent=`El periodo debe estar entre hoy (${windowNow.min}) y ${windowNow.max}.`;return;
+    if(!start||!end||start<todayKey||end<start){
+      $('clResult').textContent=`El periodo debe empezar hoy (${todayKey}) o después.`;return;
     }
     if(input.disabled){$('clResult').textContent='Espera a que termine la otra importación.';return;}
     const before=JSON.stringify(state.people[person]);input.disabled=true;lock(true);$('clResult').textContent='';$('clDiff').textContent='';resetProgress();
