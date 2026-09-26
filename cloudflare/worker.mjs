@@ -1,5 +1,5 @@
 import * as RosterParserRuntime from './roster-parser-runtime.mjs';
-const VERSION='1.1.8';
+const VERSION='1.1.10';
 const START='http://crewlink.corendonairlines.com:8090/crewlink/crewlink.jsp?crewlinkOperation=crewlinkForCrew&resetSession=Y';
 const DUTY='http://crewlink.corendonairlines.com:8090/crewlink/clApp?crewlinkService=individualDutyPlan&crewlinkOperation=default&crewlinkSourcePage=spCrew';
 const ORIGIN='http://crewlink.corendonairlines.com:8090';
@@ -105,6 +105,18 @@ function sanitizedJobs(jobs){
   for(const [k,j] of Object.entries(jobs||{}))out[k]={profile:j.profile,enabled:!!j.enabled,crewCode:j.crewCode||'',name:j.name||'',briefingLead:j.briefingLead,lastAttemptAt:j.lastAttemptAt||null,lastSuccessAt:j.lastSuccessAt||null,lastError:j.lastError||null,lastRange:j.lastRange||null,configuredAt:j.configuredAt||null};
   return out;
 }
+function autoSyncCounts(parsed){
+  const duties=Array.isArray(parsed?.duties)?parsed.duties.length:0;
+  const flights=(parsed?.duties||[]).reduce((sum,d)=>sum+(Array.isArray(d?.flights)?d.flights.length:0),0);
+  return {duties,flights};
+}
+async function rosterFingerprint(parsed){
+  const stable=JSON.stringify({period:parsed?.period||null,crew:parsed?.crew||null,duties:parsed?.duties||[]});
+  const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(stable)));
+  return [...digest].map(x=>x.toString(16).padStart(2,'0')).join('');
+}
+function trimAutoHistory(items){return (Array.isArray(items)?items:[]).slice(-30);}
+
 
 class CalendarStore{
   constructor(state){this.state=state;}
@@ -145,18 +157,31 @@ class CalendarStore{
       const jobs=(await this.state.storage.get('autoJobs'))||{},calendarProfile=await this.state.storage.get('calendarProfile');
       return json({jobs:sanitizedJobs(jobs),calendarProfile:calendarProfile===0||calendarProfile===1?calendarProfile:null,calendarUpdatedAt:(await this.state.storage.get('updatedAt'))||null});
     }
+    if(request.method==='GET'&&/^\/autosync\/history\/[01]$/.test(path)){
+      const profile=path.split('/').pop(),history=(await this.state.storage.get(`autoHistory:${profile}`))||[];
+      return json({profile:Number(profile),history:[...history].reverse()});
+    }
     if(request.method==='POST'&&path==='/autosync/result'){
       const payload=await request.json(),profile=Number(payload.profile),jobs=(await this.state.storage.get('autoJobs'))||{},key=String(profile),job=jobs[key];
       if(!job)return json({error:'Auto Sync no configurado.'},404);
-      const now=new Date().toISOString();
+      const now=new Date().toISOString(),rosterKey=`remoteRoster:${profile}`,previous=await this.state.storage.get(rosterKey);
+      const fingerprint=String(payload.fingerprint||''),changed=!previous?.fingerprint||previous.fingerprint!==fingerprint;
+      const counts={duties:Math.max(0,Number(payload.counts?.duties)||0),flights:Math.max(0,Number(payload.counts?.flights)||0)};
+      const historyKey=`autoHistory:${profile}`,history=(await this.state.storage.get(historyKey))||[];
+      history.push({at:now,status:'ok',changed,range:payload.range||null,counts,tries:Math.max(1,Number(payload.tries)||1)});
       jobs[key]={...job,lastAttemptAt:now,lastSuccessAt:now,lastError:null,lastRange:payload.range||null};
-      const values={autoJobs:jobs,[`remoteRoster:${profile}`]:{parsed:payload.parsed,syncedAt:now,range:payload.range||null}};
+      const values={autoJobs:jobs,[rosterKey]:{parsed:payload.parsed,syncedAt:now,range:payload.range||null,fingerprint},[historyKey]:trimAutoHistory(history)};
       if(validIcs(payload.briefings)&&validIcs(payload.flights)){values.briefings=payload.briefings;values.flights=payload.flights;values.updatedAt=now;}
-      await this.state.storage.put(values);return json({ok:true,syncedAt:now});
+      await this.state.storage.put(values);return json({ok:true,syncedAt:now,changed,counts});
     }
     if(request.method==='POST'&&path==='/autosync/fail'){
       const payload=await request.json(),profile=Number(payload.profile),jobs=(await this.state.storage.get('autoJobs'))||{},key=String(profile),job=jobs[key];
-      if(job){jobs[key]={...job,lastAttemptAt:new Date().toISOString(),lastError:String(payload.error||'Error desconocido').slice(0,500)};await this.state.storage.put('autoJobs',jobs);}
+      if(job){
+        const now=new Date().toISOString(),error=String(payload.error||'Error desconocido').slice(0,500),historyKey=`autoHistory:${profile}`,history=(await this.state.storage.get(historyKey))||[];
+        history.push({at:now,status:'error',error,range:payload.range||null,tries:Math.max(1,Number(payload.tries)||1)});
+        jobs[key]={...job,lastAttemptAt:now,lastError:error};
+        await this.state.storage.put({autoJobs:jobs,[historyKey]:trimAutoHistory(history)});
+      }
       return json({ok:true});
     }
     if(request.method==='GET'&&/^\/autosync\/roster\/[01]$/.test(path)){
@@ -241,7 +266,7 @@ async function acquireCdp(env){
     throw Error(`Cloudflare Browser Run respondió HTTP ${acquire.status}.`);
   }
   const info=await acquire.json();if(!info?.sessionId)throw Error('Cloudflare no devolvió una sesión de navegador.');
-  const upgrade=await env.BROWSER.fetch(`${host}/v1/devtools/browser/${encodeURIComponent(info.sessionId)}`,{headers:{Upgrade:'websocket','cf-brapi-client':'RosterHome/1.1.8'}});
+  const upgrade=await env.BROWSER.fetch(`${host}/v1/devtools/browser/${encodeURIComponent(info.sessionId)}`,{headers:{Upgrade:'websocket','cf-brapi-client':'RosterHome/1.1.10'}});
   if(!upgrade.webSocket)throw Error(`No se pudo abrir el canal de control del navegador remoto (HTTP ${upgrade.status}).`);
   const ws=upgrade.webSocket;ws.accept();const cdp=new CdpClient(ws);
   const {targetId}=await cdp.send('Target.createTarget',{url:'about:blank'});
@@ -435,23 +460,36 @@ async function browserSync(env,payload,progress){
     const crewlinkWindow=await evaluate(cdp,sessionId,`(()=>{
       const f=[...document.forms].find(x=>x.elements?.crewlinkOperation?.value==='makeReport');
       if(!f)return null;
-      return {
-        begin:String(f.elements?.beginDate?.value||'').trim(),
-        end:String(f.elements?.endDate?.value||'').trim()
+      const pick=(name)=>{
+        const e=f.elements?.[name]||document.querySelector('[name="'+name+'"],#'+name);
+        if(!e)return '';
+        return String(e.value||e.defaultValue||e.getAttribute?.('value')||'').trim();
       };
+      return {begin:pick('beginDate'),end:pick('endDate')};
     })()`,12000);
+
     const availableStart=crewlinkDateToIso(crewlinkWindow?.begin);
     const availableEnd=crewlinkDateToIso(crewlinkWindow?.end);
-    if(!availableStart||!availableEnd)throw Error('CrewLink no publicó correctamente su periodo seleccionable.');
 
     let selectedStart,selectedEnd;
     if(payload.useCrewlinkWindow===true){
+      // Auto Sync has no user-selected dates, so it MUST use CrewLink's own
+      // live range. If the portal does not expose it, fail safely.
+      if(!availableStart||!availableEnd)throw Error('CrewLink no publicó correctamente su periodo seleccionable para Auto Sync.');
       selectedStart=availableStart;
       selectedEnd=availableEnd;
     }else{
+      // Manual import already has explicit dates selected by the user. Do not
+      // block a valid import just because CrewLink's date widgets don't expose
+      // their values in the DOM on this browser/device.
       selectedStart=String(payload.start||'');
       selectedEnd=String(payload.end||'');
-      if(selectedStart<availableStart||selectedEnd>availableEnd||selectedEnd<selectedStart){
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(selectedStart)||!/^\d{4}-\d{2}-\d{2}$/.test(selectedEnd)||selectedEnd<selectedStart){
+        throw Error('Selecciona un periodo válido.');
+      }
+      // Validate against CrewLink's live bounds only when they are actually
+      // readable. Otherwise submit the user's dates and let CrewLink answer.
+      if(availableStart&&availableEnd&&(selectedStart<availableStart||selectedEnd>availableEnd)){
         throw Error(`CrewLink permite actualmente ${availableStart} → ${availableEnd}.`);
       }
     }
@@ -541,7 +579,7 @@ async function browserSync(env,payload,progress){
     const pdfBase64=await evaluate(cdp,sessionId,fetchExpr,60000);
     if(!pdfBase64)throw Error('CrewLink no devolvió el PDF.');
     progress(91,'PDF recibido. Enviándolo a RosterHome…');
-    return {pdfBase64,range:selectedRange,availableRange:{start:availableStart,end:availableEnd}};
+    return {pdfBase64,range:selectedRange,availableRange:availableStart&&availableEnd?{start:availableStart,end:availableEnd}:null};
   }catch(error){
     throw Error(`${phase}: ${String(error?.message||error)}`);
   }finally{
@@ -671,9 +709,11 @@ async function runAutoSyncProfile(env,token,profile){
       if(!parsed?.coverage?.complete)throw Error('El roster diario no reconcilia sus totales; se conserva el último roster válido.');
       let calendars={briefings:null,flights:null};
       if(jobsData.calendarProfile===Number(profile))calendars=calendarBundle(job.name||job.crewCode,processed.briefings,processed.flights);
-      const result=await stub.fetch('https://calendar-store/autosync/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:Number(profile),parsed,range,...calendars})});
+      const counts=autoSyncCounts(parsed),fingerprint=await rosterFingerprint(parsed);
+      const result=await stub.fetch('https://calendar-store/autosync/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:Number(profile),parsed,range,counts,fingerprint,tries:tryNo,...calendars})});
       if(!result.ok)throw Error('No se pudo guardar el roster automático.');
-      return {ok:true,profile:Number(profile),range,attempt,tries:tryNo};
+      const saved=await result.json();
+      return {ok:true,profile:Number(profile),range,attempt,tries:tryNo,changed:!!saved.changed,counts:saved.counts||counts};
     }catch(error){
       lastError=error;
       const message=String(error?.message||error);
@@ -682,7 +722,7 @@ async function runAutoSyncProfile(env,token,profile){
       break;
     }
   }
-  const message=safeCrewlinkError(lastError);await stub.fetch('https://calendar-store/autosync/fail',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:Number(profile),error:message})});throw Error(message);
+  const message=safeCrewlinkError(lastError);await stub.fetch('https://calendar-store/autosync/fail',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:Number(profile),error:message,tries:2})});throw Error(message);
 }
 async function runAllAutoSync(env){
   if(!env.CALENDAR_STORE||!env.BROWSER)return;
@@ -720,6 +760,11 @@ async function autoSyncApi(request,env,path){
   }
   if(path==='/api/autosync/status'&&request.method==='GET'){
     if(!CAL_TOKEN_RE.test(token))return json({error:'Token Auto Sync inválido.'},400);return (await tokenStore(env,token)).fetch('https://calendar-store/autosync/status');
+  }
+  if(path==='/api/autosync/history'&&request.method==='GET'){
+    const profile=Number(u.searchParams.get('profile'));
+    if(!CAL_TOKEN_RE.test(token)||![0,1].includes(profile))return json({error:'Solicitud inválida.'},400);
+    return (await tokenStore(env,token)).fetch(`https://calendar-store/autosync/history/${profile}`);
   }
   if(path==='/api/autosync/roster'&&request.method==='GET'){
     const profile=Number(u.searchParams.get('profile'));if(!CAL_TOKEN_RE.test(token)||![0,1].includes(profile))return json({error:'Solicitud inválida.'},400);return (await tokenStore(env,token)).fetch(`https://calendar-store/autosync/roster/${profile}`);

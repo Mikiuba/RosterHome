@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 import {readEnhancementsSource} from './_enhancements-source.mjs';
-test('v1.1.8 Together UI exposes concise metrics and overlay sheet',()=>{
+test('v1.1.10 Together UI exposes concise metrics and overlay sheet',()=>{
   const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
   const js=readEnhancementsSource();
   const css=fs.readFileSync(new URL('../styles.css',import.meta.url),'utf8');

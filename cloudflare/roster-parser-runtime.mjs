@@ -1,4 +1,4 @@
-/* RosterHome v1.1.8 · Worker-native parser.
+/* RosterHome v1.1.10 · Worker-native parser.
  * Generated from the same source logic as /roster-parser.js so Auto Sync
  * does not execute parser code inside the remote browser.
  */

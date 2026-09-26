@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-test('v1.1.8 keeps mobile tabs readable and exposes timezone selector',()=>{
+test('v1.1.10 keeps mobile tabs readable and exposes timezone selector',()=>{
   const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
   const css=fs.readFileSync(new URL('../styles.css',import.meta.url),'utf8');
 

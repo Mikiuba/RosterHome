@@ -1,4 +1,4 @@
-/* RosterHome v1.1.8 — Hybrid CrewLink import.
+/* RosterHome v1.1.10 — Hybrid CrewLink import.
  * Desktop Chrome: uses the local RosterHome Bridge when present.
  * iPhone/Safari or any browser without the extension: uses a temporary Cloudflare Browser Run session.
  */
@@ -43,7 +43,7 @@
   const todayKey=localDateKey(new Date());
   $('clStart').min=todayKey;$('clEnd').min=todayKey;
   $('clStart').value=todayKey;$('clEnd').value=todayKey;
-  $('clDateWindow').textContent='CrewLink validará el último día realmente disponible al iniciar sesión.';
+  $('clDateWindow').textContent='Elige desde hoy. RosterHome usará el límite de CrewLink si el portal lo publica; si no, enviará tus fechas y CrewLink las validará.';
   $('clStart').addEventListener('change',()=>{
     const start=$('clStart').value||todayKey;
     $('clEnd').min=start;

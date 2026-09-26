@@ -1,8 +1,8 @@
-/* RosterHome v1.1.8 · daily CrewLink Auto Sync */
+/* RosterHome v1.1.10 · daily CrewLink Auto Sync */
 (()=>{
   const $=id=>document.getElementById(id);if(!$('autoSyncCard'))return;
   const KEY_STORE='rosterhome_cloud_access_key',TOKEN_STORE='rosterhome_calendar_feed_token',APPLIED='rosterhome_autosync_applied_';
-  let jobs={},busy=false,metadataTimer=null;
+  let jobs={},history=[],busy=false,metadataTimer=null;
 
   function status(text,kind=''){const el=$('autoSyncStatus');if(el){el.textContent=text||'';el.dataset.kind=kind;}}
   function randomToken(){const b=new Uint8Array(32);crypto.getRandomValues(b);let s='';for(const x of b)s+=String.fromCharCode(x);return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
@@ -22,6 +22,45 @@
     if($('autoSyncBadge')){$('autoSyncBadge').className='storage-badge '+(active.length?'ok':'checking');$('autoSyncBadge').textContent=active.length?`${active.length} activo${active.length>1?'s':''}`:'Desactivado';}
     if(!box)return;
     box.innerHTML=active.length?active.sort((a,b)=>a.profile-b.profile).map(j=>`<div class="auto-sync-row"><div><b>${escapeHtml(j.name||j.crewCode||`Perfil ${j.profile+1}`)}</b><span>${escapeHtml(j.crewCode||'')} · diario</span></div><div><b>${j.lastError?'⚠️ Último intento falló':'✓ Activo'}</b><span>${j.lastSuccessAt?`último OK ${fmtWhen(j.lastSuccessAt)}`:'pendiente de primera sincronización'}</span>${j.lastError?`<small>${escapeHtml(j.lastError)}</small>`:''}</div></div>`).join(''):'<p class="muted">No hay perfiles configurados para actualización automática.</p>';
+  }
+
+  function shortDate(v){
+    if(!v)return '—';
+    try{return new Intl.DateTimeFormat('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(v));}
+    catch{return String(v);}
+  }
+  function shortRange(range){
+    if(!range?.start||!range?.end)return '';
+    const f=v=>{const m=String(v).match(/^\d{4}-(\d{2})-(\d{2})$/);return m?`${m[2]}/${m[1]}`:String(v);};
+    return `${f(range.start)} → ${f(range.end)}`;
+  }
+  function renderHistory(){
+    const box=$('autoSyncHistory'),label=$('autoSyncHistoryLabel'),i=selected();
+    if(label)label.textContent=personName(i);
+    if(!box)return;
+    if(!history.length){
+      box.innerHTML='<p class="muted">Todavía no hay ejecuciones registradas para este perfil. Aparecerán tras la próxima sincronización.</p>';
+      return;
+    }
+    box.innerHTML=history.slice(0,10).map(h=>{
+      const ok=h.status==='ok',title=ok?(h.changed?'Actualizado':'Sin cambios'):'Falló';
+      const counts=ok?` · ${Number(h.counts?.duties||0)} duties · ${Number(h.counts?.flights||0)} vuelos`:'';
+      const range=shortRange(h.range),extra=range?`<span>${escapeHtml(range)}</span>`:'';
+      const error=!ok&&h.error?`<small>${escapeHtml(h.error)}</small>`:'';
+      return `<div class="auto-sync-history-row ${ok?'ok':'error'}"><div class="auto-sync-history-time">${escapeHtml(shortDate(h.at))}</div><div class="auto-sync-history-result"><b>${ok?'✓':'⚠️'} ${escapeHtml(title)}${escapeHtml(counts)}</b>${extra}${error}</div></div>`;
+    }).join('');
+  }
+  async function refreshHistory({silent=false}={}){
+    if(accessKey().length<32){history=[];renderHistory();return;}
+    const i=selected();
+    try{
+      const data=await api(`/api/autosync/history?token=${encodeURIComponent(token())}&profile=${i}`);
+      history=Array.isArray(data.history)?data.history:[];
+      renderHistory();
+    }catch(err){
+      history=[];renderHistory();
+      if(!silent)status(`No se pudo consultar el historial: ${err.message}`,'error');
+    }
   }
   function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
   function reviveParsed(parsed){if(parsed?.period){if(typeof parsed.period.start==='string')parsed.period.start=new Date(parsed.period.start);if(typeof parsed.period.end==='string')parsed.period.end=new Date(parsed.period.end);}return parsed;}
@@ -53,10 +92,10 @@
       $('autoSyncPassword').value='';jobs[String(i)]={...(jobs[String(i)]||{}),profile:i,enabled:true,crewCode:user.toUpperCase(),name:personName(i)};renderJobs();syncUser();
       status('✓ Auto Sync activado. Haciendo la primera actualización…','ok');
       try{
-        await api('/api/autosync/run',{method:'POST',body:{token:token(),profile:i}});await refreshStatus({silent:true});await pullRoster(i);
+        await api('/api/autosync/run',{method:'POST',body:{token:token(),profile:i}});await refreshStatus({silent:true});await refreshHistory({silent:true});await pullRoster(i);
         status(`✓ Auto Sync activado para ${personName(i)} y primera actualización completada.`,'ok');
       }catch(syncErr){
-        await refreshStatus({silent:true});
+        await refreshStatus({silent:true});await refreshHistory({silent:true});
         status(`✓ Auto Sync está activado para ${personName(i)}. La primera actualización falló: ${syncErr.message} Se reintentará automáticamente mañana y puedes pulsar “Actualizar ahora”.`,'warn');
       }
     }catch(err){status(`No se pudo guardar la configuración de Auto Sync: ${err.message}`,'error');await refreshStatus({silent:true});}
@@ -64,8 +103,8 @@
   }
   async function runNow(){
     if(busy||!configured(selected()))return;const i=selected();lock(true);status(`Actualizando ${personName(i)} desde CrewLink…`);
-    try{await api('/api/autosync/run',{method:'POST',body:{token:token(),profile:i}});await refreshStatus({silent:true});await pullRoster(i);status(`✓ ${personName(i)} actualizado ahora mismo.`,'ok');}
-    catch(err){status(`Actualización fallida: ${err.message}`,'error');await refreshStatus({silent:true});}finally{lock(false);syncUser();}
+    try{await api('/api/autosync/run',{method:'POST',body:{token:token(),profile:i}});await refreshStatus({silent:true});await refreshHistory({silent:true});await pullRoster(i);status(`✓ ${personName(i)} actualizado ahora mismo.`,'ok');}
+    catch(err){status(`Actualización fallida: ${err.message}`,'error');await refreshStatus({silent:true});await refreshHistory({silent:true});}finally{lock(false);syncUser();}
   }
   async function disable(){
     if(busy||!configured(selected()))return;const i=selected();lock(true);
@@ -78,15 +117,16 @@
   function queueMetadata(){clearTimeout(metadataTimer);metadataTimer=setTimeout(syncMetadata,4000);}
   async function startup(){
     try{$('autoSyncKey').value=localStorage.getItem(KEY_STORE)||'';}catch{}syncNames();syncUser();if(accessKey().length<32){renderJobs();status('Auto Sync listo para configurar.');return;}
-    await refreshStatus({silent:true});for(const i of [0,1])if(configured(i))await pullRoster(i,{silent:true});renderJobs();syncUser();
+    await refreshStatus({silent:true});await refreshHistory({silent:true});for(const i of [0,1])if(configured(i))await pullRoster(i,{silent:true});renderJobs();syncUser();
   }
 
-  $('autoSyncPerson')?.addEventListener('change',syncUser);
+  $('autoSyncPerson')?.addEventListener('change',()=>{syncUser();refreshHistory({silent:true});});
   $('autoSyncEnable')?.addEventListener('click',configure);
   $('autoSyncRun')?.addEventListener('click',runNow);
   $('autoSyncDisable')?.addEventListener('click',disable);
+  $('autoSyncHistoryRefresh')?.addEventListener('click',()=>refreshHistory());
   $('autoSyncKey')?.addEventListener('change',()=>refreshStatus());
-  window.addEventListener('online',async()=>{await refreshStatus({silent:true});for(const i of [0,1])if(configured(i))await pullRoster(i,{silent:true});});
+  window.addEventListener('online',async()=>{await refreshStatus({silent:true});await refreshHistory({silent:true});for(const i of [0,1])if(configured(i))await pullRoster(i,{silent:true});});
   window.addEventListener('rh-storage-saved',queueMetadata);
   window.addEventListener('pagehide',()=>{if($('autoSyncPassword'))$('autoSyncPassword').value='';});
   setTimeout(startup,1200);

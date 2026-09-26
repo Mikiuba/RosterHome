@@ -1,4 +1,4 @@
-# RosterHome v1.1.8 — iPhone Direct + Windows Bridge
+# RosterHome v1.1.10 — iPhone Direct + Windows Bridge
 
 Esta versión permite actualizar CrewLink directamente desde iPhone/Safari sin depender del PC.
 
@@ -344,3 +344,30 @@ v1.1.8 elimina esa arquitectura:
 Esto elimina una sesión de ejecución JavaScript remota del camino crítico y
 evita el error opaco `Uncaught`. Además, los errores CDP ahora conservan la
 descripción real de la excepción.
+
+
+## v1.1.9 — historial de Auto Sync
+
+Cada perfil conserva las últimas 30 ejecuciones. En Reglas se muestran las 10
+más recientes con fecha/hora, `Actualizado` o `Sin cambios`, duties, vuelos,
+periodo CrewLink y el error concreto cuando una ejecución falla.
+
+El Worker calcula un SHA-256 semántico del roster para distinguir una ejecución
+correcta sin novedades de una actualización que realmente cambió el roster.
+
+
+## v1.1.10 — fix importación manual de CrewLink en iPhone
+
+La importación manual podía detenerse con
+`CrewLink no publicó correctamente su periodo seleccionable` aunque el login y
+Individual Duty Plan hubieran abierto correctamente.
+
+Causa: algunos renderizados de CrewLink no exponen `beginDate/endDate` mediante
+`element.value`, aunque el formulario sea válido.
+
+Ahora:
+- se intenta también `defaultValue` y el atributo HTML `value`;
+- Auto Sync sigue exigiendo el rango live de CrewLink;
+- la importación manual NO se bloquea si ese rango no puede leerse: usa las fechas
+  elegidas por el usuario y deja que el propio servidor CrewLink las valide;
+- si CrewLink sí expone los límites, RosterHome continúa validándolos antes de enviar.

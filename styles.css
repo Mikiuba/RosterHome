@@ -735,7 +735,7 @@ html[data-connectivity="offline"] .cl-progress{
 
 
 /* =========================================================
-   RosterHome v1.1.8 · Calendar export
+   RosterHome v1.1.10 · Calendar export
    ========================================================= */
 .calendar-export-card{
   margin-top:16px;
@@ -795,7 +795,7 @@ html[data-connectivity="offline"] .cl-progress{
 .auto-sync-row>div{display:flex;flex-direction:column;gap:2px}.auto-sync-row span,.auto-sync-row small{font-size:11px;color:var(--muted)}
 @media(max-width:620px){.auto-sync-row{display:grid}.auto-sync-grid{grid-template-columns:1fr!important}}
 
-/* v1.1.8 · Auto Sync status readability */
+/* v1.1.10 · Auto Sync status readability */
 .auto-sync-row>div{min-width:0}
 .auto-sync-row b,.auto-sync-row span,.auto-sync-row small{display:block;overflow-wrap:anywhere;word-break:normal}
 .auto-sync-row small{margin-top:4px;line-height:1.35}
@@ -804,3 +804,20 @@ html[data-connectivity="offline"] .cl-progress{
   .auto-sync-row{grid-template-columns:1fr;gap:10px}
   .auto-sync-row>div+div{padding-top:8px;border-top:1px solid var(--line)}
 }
+
+
+/* v1.1.10 · Auto Sync history */
+.auto-sync-history-card{margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.018)}
+.auto-sync-history-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+.auto-sync-history-head>div{display:flex;flex-direction:column;gap:2px}
+.auto-sync-history-head b{font-size:12px}.auto-sync-history-head span{font-size:11px;color:var(--muted)}
+.auto-sync-history-refresh{padding:7px 10px;font-size:11px}
+.auto-sync-history{display:grid;gap:6px}.auto-sync-history>.muted{margin:2px 0;font-size:11px}
+.auto-sync-history-row{display:grid;grid-template-columns:105px minmax(0,1fr);gap:10px;align-items:start;padding:9px 10px;border-radius:10px;background:rgba(255,255,255,.018)}
+.auto-sync-history-time{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.auto-sync-history-result{min-width:0}
+.auto-sync-history-result b{display:block;font-size:11px;overflow-wrap:anywhere}
+.auto-sync-history-result span,.auto-sync-history-result small{display:block;margin-top:2px;color:var(--muted);font-size:10px;line-height:1.35;overflow-wrap:anywhere}
+.auto-sync-history-row.ok .auto-sync-history-result b{color:#86e5c7}
+.auto-sync-history-row.error .auto-sync-history-result b{color:#ff9aab}
+@media(max-width:620px){.auto-sync-history-head{align-items:flex-start}.auto-sync-history-row{grid-template-columns:1fr;gap:3px}.auto-sync-history-refresh{white-space:nowrap}}

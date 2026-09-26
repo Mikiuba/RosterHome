@@ -5,21 +5,22 @@ import fs from 'node:fs';
 const worker=fs.readFileSync(new URL('../cloudflare/worker.mjs',import.meta.url),'utf8');
 const client=fs.readFileSync(new URL('../crewlink-sync.js',import.meta.url),'utf8');
 
-test('Auto Sync reads the live CrewLink begin/end dates from makeReport form',()=>{
+test('Auto Sync reads CrewLink begin/end using resilient field extraction',()=>{
   assert.match(worker,/const crewlinkWindow=await evaluate/);
-  assert.match(worker,/elements\?\.beginDate\?\.value/);
-  assert.match(worker,/elements\?\.endDate\?\.value/);
+  assert.match(worker,/pick\('beginDate'\)/);
+  assert.match(worker,/pick\('endDate'\)/);
+  assert.match(worker,/e\.value\|\|e\.defaultValue\|\|e\.getAttribute/);
   assert.match(worker,/payload\.useCrewlinkWindow===true/);
-  assert.match(worker,/selectedRange=\{start:selectedStart,end:selectedEnd\}/);
 });
 
-test('Auto Sync no longer guesses end-of-month plus two months',()=>{
-  assert.doesNotMatch(worker,/getUTCMonth\(\)\+3,0/);
-  assert.doesNotMatch(worker,/function autoRange/);
-  assert.match(worker,/useCrewlinkWindow:true/);
+test('Auto Sync still requires the live CrewLink window',()=>{
+  assert.match(worker,/periodo seleccionable para Auto Sync/);
+  assert.match(worker,/selectedStart=availableStart/);
+  assert.match(worker,/selectedEnd=availableEnd/);
 });
 
-test('manual cloud import delegates the real upper bound to CrewLink',()=>{
-  assert.doesNotMatch(client,/crewlinkSelectableWindow/);
-  assert.match(client,/CrewLink validará el último día realmente disponible/);
+test('manual cloud import can continue when CrewLink hides its upper-bound fields',()=>{
+  assert.match(client,/Elige desde hoy/);
+  assert.match(worker,/Manual import already has explicit dates selected by the user/);
+  assert.match(worker,/Otherwise submit the user's dates and let CrewLink answer/);
 });
